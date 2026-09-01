@@ -1,0 +1,22 @@
+[Unit]
+Description=Candle Rider API/game server (native Node, no container)
+After=network.target
+
+[Service]
+Type=simple
+User=candlerider
+Group=candlerider
+WorkingDirectory=/opt/candle-rider
+EnvironmentFile=/opt/candle-rider/deploy/env/candle-rider-api.env
+ExecStart=/usr/bin/node server/src/index.js
+Restart=on-failure
+RestartSec=3
+
+# Hardening — reasonable defaults for a non-root Node service.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/candle-rider/server/data
+
+[Install]
+WantedBy=multi-user.target
