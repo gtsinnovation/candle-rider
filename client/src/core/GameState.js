@@ -37,13 +37,21 @@ export class GameState {
       minHealthSeen: 100,
       startedAt: Date.now(),
     };
+    // state.bag is a LIVE MIRROR of currentRun.bag for HUD display only —
+    // the permanent record. It's zeroed at the start/end of every run;
+    // the real "did this run's earnings survive" answer is whether
+    // cashOut() or loseRun() ran, which is what actually moves pnl/reputation.
+    this.state.bag = 0;
     eventBus.emit('run:started', { pathId });
+    eventBus.emit('state:changed', this.snapshot());
   }
 
   addBag(amount) {
     if (!this.currentRun) return;
     this.currentRun.bag += amount;
+    this.state.bag = this.currentRun.bag; // keep HUD live during the run
     eventBus.emit('run:bagChanged', { bag: this.currentRun.bag });
+    eventBus.emit('state:changed', this.snapshot());
   }
 
   reportHealth(health) {
@@ -53,9 +61,29 @@ export class GameState {
     eventBus.emit('state:changed', this.snapshot());
   }
 
+  reportEnergy(energy) {
+    this.state.energy = Math.max(0, Math.min(100, energy));
+    eventBus.emit('state:changed', this.snapshot());
+  }
+
   reportBossDefeated() {
     if (!this.currentRun) return;
     this.currentRun.bossDefeated = true;
+  }
+
+  // Ends the run WITHOUT converting Bag to permanent currency — used when
+  // the player dies/gets rugged rather than voluntarily cashing out. This
+  // is the actual risk in "risk vs. reward": walk away with nothing if you
+  // don't cash out before the run ends badly.
+  loseRun(reason) {
+    if (!this.currentRun) return null;
+    const { pathId } = this.currentRun;
+    this.state.bag = 0;
+    this.currentRun = null;
+    const result = { pathId, reason };
+    eventBus.emit('run:lost', result);
+    eventBus.emit('state:changed', this.snapshot());
+    return result;
   }
 
   // Ends the run, converts Bag -> PNL/Reputation/Shards using the shared
@@ -76,6 +104,7 @@ export class GameState {
     this.bumpPathMastery(pathId, bossDefeated ? 2 : 1);
 
     const result = { pathId, pnlEarned, reputationEarned, shardsEarned, bossDefeated, flawless };
+    this.state.bag = 0;
     this.currentRun = null;
     eventBus.emit('run:cashout', result);
     eventBus.emit('state:changed', this.snapshot());

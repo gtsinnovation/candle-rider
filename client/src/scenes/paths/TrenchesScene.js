@@ -1,0 +1,356 @@
+// client/src/scenes/paths/TrenchesScene.js
+//
+// Path 1 — Memecoin & Trenches Degen. Endless-runner platforming: jump
+// between lanes of candle platforms, riding green ones for Bag and getting
+// punished for standing on ones that flip red. Ported from the standalone
+// Three.js prototype into the real game — same mechanics, now reading/
+// writing through GameState instead of a local `stats` object, and reusing
+// the global HUD (bag/health/energy/conviction) instead of drawing its own.
+//
+// Manual cash-out is bound to Escape (Space is taken by Jump here, unlike
+// the other four paths where Space is free for cash-out).
+
+import * as THREE from 'three';
+import { eventBus } from '../../core/EventBus.js';
+
+const LANES = [-2.4, 0, 2.4];
+const CANDLE_W = 1.5;
+const CANDLE_D = 1.6;
+const DESPAWN_Z = 6;
+const GRAVITY = -20;
+
+export function mountTrenchesScene(container, gameState, onRunEnd) {
+  gameState.startRun('trenches');
+
+  // ---------- DOM scaffold (scene-specific UI only; global HUD covers
+  // bag/health/energy/conviction/reputation already) ----------
+  const root = document.createElement('div');
+  root.style.cssText = 'position:absolute; inset:0;';
+  container.appendChild(root);
+
+  const canvasHost = document.createElement('div');
+  canvasHost.style.cssText = 'position:absolute; inset:0;';
+  root.appendChild(canvasHost);
+
+  const laneIndicator = document.createElement('div');
+  laneIndicator.style.cssText = `
+    position:absolute; bottom:26px; left:50%; transform:translateX(-50%);
+    display:flex; gap:8px; z-index:5;
+  `;
+  laneIndicator.innerHTML = `
+    <div class="lane-dot" data-lane="0"></div>
+    <div class="lane-dot" data-lane="1"></div>
+    <div class="lane-dot" data-lane="2"></div>
+  `;
+  root.appendChild(laneIndicator);
+
+  const style = document.createElement('style');
+  style.textContent = `
+    .lane-dot { width:34px; height:6px; border-radius:3px; background:#24243f; border:1px solid #3a3a5f; }
+    .lane-dot.active { background:#7dffcf; box-shadow:0 0 10px #7dffcf; }
+  `;
+  root.appendChild(style);
+
+  const combo = document.createElement('div');
+  combo.style.cssText = `
+    position:absolute; top:90px; left:50%; transform:translateX(-50%);
+    font-size:13px; color:#ffd166; opacity:0; transition:opacity .2s;
+    text-shadow:0 0 10px rgba(255,209,102,.6); pointer-events:none; z-index:5;
+    font-family: system-ui, sans-serif;
+  `;
+  root.appendChild(combo);
+
+  const hint = document.createElement('div');
+  hint.style.cssText = `
+    position:absolute; bottom:20px; right:22px; font-size:11px; color:#6f6f95;
+    text-align:right; line-height:1.5; font-family: system-ui, sans-serif; z-index:5;
+  `;
+  hint.innerHTML = 'A / D or ← → : change lane<br/>SPACE : jump<br/>ESC : cash out';
+  root.appendChild(hint);
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = `
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    flex-direction:column; background:rgba(3,3,10,.82); text-align:center; z-index:10;
+    font-family: system-ui, sans-serif;
+  `;
+  overlay.innerHTML = `
+    <h2 id="tr-overlay-title" style="font-size:26px;color:#ff6688;margin:0 0 6px;text-shadow:0 0 16px rgba(255,102,136,.6);">RUGPULLED</h2>
+    <p id="tr-overlay-reason" style="color:#c9c9e6;font-size:13px;margin:4px 0 18px;max-width:360px;"></p>
+    <div style="display:flex; gap:10px;">
+      <button id="tr-retry-btn" style="background:#7dffcf;color:#05100c;border:none;padding:10px 22px;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;">RUN IT BACK</button>
+      <button id="tr-hub-btn" style="background:#3a3a6f;color:#eef0ff;border:none;padding:10px 22px;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;">RETURN TO HUB</button>
+    </div>
+  `;
+  root.appendChild(overlay);
+
+  function popCombo(text, color) {
+    combo.textContent = text;
+    combo.style.color = color || '#ffd166';
+    combo.style.opacity = '1';
+    clearTimeout(popCombo._t);
+    popCombo._t = setTimeout(() => (combo.style.opacity = '0'), 550);
+  }
+
+  // ---------- THREE SETUP ----------
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x050510, 0.028);
+  scene.background = new THREE.Color(0x050510);
+
+  const camera = new THREE.PerspectiveCamera(62, canvasHost.clientWidth / canvasHost.clientHeight || 1, 0.1, 200);
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  function resize() {
+    const w = canvasHost.clientWidth || window.innerWidth;
+    const h = canvasHost.clientHeight || window.innerHeight;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  }
+  canvasHost.appendChild(renderer.domElement);
+  resize();
+  window.addEventListener('resize', resize);
+
+  scene.add(new THREE.AmbientLight(0x30304a, 1.1));
+  const dirLight = new THREE.DirectionalLight(0x9fb4ff, 0.6);
+  dirLight.position.set(4, 10, 6);
+  scene.add(dirLight);
+  const rimLight = new THREE.PointLight(0x7dffcf, 1.4, 20);
+  rimLight.position.set(0, 3, 2);
+  scene.add(rimLight);
+
+  const grid = new THREE.GridHelper(400, 80, 0x3a2a6a, 0x1a1a35);
+  grid.position.y = -1.2;
+  scene.add(grid);
+
+  LANES.forEach((x) => {
+    const geo = new THREE.PlaneGeometry(0.05, 400);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x2c2c55, transparent: true, opacity: 0.5 });
+    const line = new THREE.Mesh(geo, mat);
+    line.rotation.x = -Math.PI / 2;
+    line.position.set(x, -1.18, -150);
+    scene.add(line);
+  });
+
+  let laneIndex = 1;
+  const player = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x0d3d34, emissive: 0x18ffcf, emissiveIntensity: 0.9, roughness: 0.35 });
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.4, 0.9, 12), bodyMat);
+  torso.position.y = 0.55;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 16), bodyMat);
+  head.position.y = 1.15;
+  player.add(torso, head);
+  player.position.set(LANES[laneIndex], 0, 0);
+  scene.add(player);
+  const playerGlow = new THREE.PointLight(0x18ffcf, 1.2, 6);
+  playerGlow.position.set(0, 1, 0.5);
+  player.add(playerGlow);
+
+  const candles = [];
+  const GREEN = 0x00ff77;
+  const RED = 0xff3355;
+
+  function candleMaterial(color) {
+    return new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.55, roughness: 0.4 });
+  }
+
+  function spawnCandle(z) {
+    const lane = Math.floor(Math.random() * 3);
+    const height = 0.6 + Math.random() * 1.6;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(CANDLE_W, height, CANDLE_D), candleMaterial(GREEN));
+    mesh.position.set(LANES[lane], height / 2 - 1.2, z);
+    scene.add(mesh);
+    candles.push({
+      mesh, lane, height, color: 'green',
+      flipAt: performance.now() + 1800 + Math.random() * 2600,
+      scored: false,
+    });
+  }
+
+  let cursorZ = -4;
+  for (let i = 0; i < 24; i++) {
+    spawnCandle(cursorZ);
+    cursorZ -= 3.4 + Math.random() * 1.4;
+  }
+
+  // ---------- STATE ----------
+  const keys = {};
+  let velY = 0;
+  let jumping = true;
+  let onCandle = null;
+  let speed = 9;
+  let elapsed = 0;
+  let streak = 0;
+  let ended = false;
+  let animId = null;
+
+  function keydown(e) {
+    keys[e.code] = true;
+    if (ended) return;
+    if ((e.code === 'ArrowLeft' || e.code === 'KeyA') && laneIndex > 0) laneIndex--;
+    if ((e.code === 'ArrowRight' || e.code === 'KeyD') && laneIndex < 2) laneIndex++;
+    if ((e.code === 'Space' || e.code === 'ArrowUp') && !jumping) {
+      jumping = true;
+      velY = 7.2;
+    }
+    if (e.code === 'Escape') cashOut();
+  }
+  function keyup(e) { keys[e.code] = false; }
+  window.addEventListener('keydown', keydown);
+  window.addEventListener('keyup', keyup);
+
+  function updateLaneDots() {
+    laneIndicator.querySelectorAll('.lane-dot').forEach((d, i) => d.classList.toggle('active', i === laneIndex));
+  }
+
+  function showOverlay(title, reason, color) {
+    ended = true;
+    overlay.querySelector('#tr-overlay-title').textContent = title;
+    overlay.querySelector('#tr-overlay-title').style.color = color || '#ff6688';
+    overlay.querySelector('#tr-overlay-reason').textContent = reason;
+    overlay.style.display = 'flex';
+  }
+
+  function cashOut() {
+    if (ended) return;
+    const result = gameState.cashOut();
+    showOverlay('CASHED OUT', `Banked $${result.pnlEarned.toLocaleString()} PNL and ${result.reputationEarned} Reputation.`, '#7dffcf');
+  }
+
+  function lose(title, reason) {
+    if (ended) return;
+    gameState.loseRun(reason);
+    showOverlay(title, reason, '#ff5577');
+  }
+
+  overlay.querySelector('#tr-retry-btn').addEventListener('click', () => {
+    teardown();
+    mountTrenchesScene(container, gameState, onRunEnd);
+    // Note: main.js's outer teardown reference now points at this now-torn-
+    // down instance. That's harmless — teardown() is idempotent (all its
+    // calls are no-ops on an already-cleaned-up scene) — but if main.js
+    // ever needs to force-close a scene mid-retry, it should track scenes
+    // by a mount generation rather than a single stale reference.
+  });
+  overlay.querySelector('#tr-hub-btn').addEventListener('click', () => {
+    teardown();
+    onRunEnd();
+  });
+
+  // ---------- LOOP ----------
+  const clock = new THREE.Clock();
+
+  function update(dt) {
+    elapsed += dt;
+    speed = 9 + Math.min(elapsed * 0.12, 7);
+
+    const targetX = LANES[laneIndex];
+    player.position.x += (targetX - player.position.x) * Math.min(1, dt * 12);
+    updateLaneDots();
+
+    velY += GRAVITY * dt;
+    player.position.y += velY * dt;
+
+    let nextCursorZ = null;
+    for (let i = candles.length - 1; i >= 0; i--) {
+      const c = candles[i];
+      c.mesh.position.z += speed * dt;
+
+      if (c.color === 'green' && performance.now() > c.flipAt) {
+        c.color = 'red';
+        c.mesh.material.color.setHex(RED);
+        c.mesh.material.emissive.setHex(RED);
+        if (onCandle === c) {
+          gameState.reportHealth(Math.max(0, gameState.state.health - 14));
+          popCombo('RUG FLIP! -14 HP', '#ff5577');
+        }
+      }
+
+      if (c.mesh.position.z > DESPAWN_Z) {
+        if (onCandle === c && !jumping) {
+          lose('RUGPULLED', 'The candle vanished under you.');
+        }
+        scene.remove(c.mesh);
+        candles.splice(i, 1);
+        continue;
+      }
+      if (nextCursorZ === null || c.mesh.position.z < nextCursorZ) nextCursorZ = c.mesh.position.z;
+    }
+    while (candles.length < 24 && !ended) {
+      cursorZ = (nextCursorZ !== null ? nextCursorZ : -4) - (3.4 + Math.random() * 1.4);
+      spawnCandle(cursorZ);
+      nextCursorZ = cursorZ;
+    }
+
+    onCandle = null;
+    for (const c of candles) {
+      const sameLane = Math.abs(c.mesh.position.x - player.position.x) < CANDLE_W / 2;
+      const nearZ = Math.abs(c.mesh.position.z - player.position.z) < CANDLE_D / 2 + 0.15;
+      const topY = c.mesh.position.y + c.height / 2 - 1.2;
+      const playerFeetY = player.position.y;
+      if (sameLane && nearZ && velY <= 0 && playerFeetY <= topY + 0.35 && playerFeetY >= topY - 0.6) {
+        player.position.y = topY;
+        velY = 0;
+        jumping = false;
+        onCandle = c;
+
+        if (!c.scored) {
+          c.scored = true;
+          if (c.color === 'green') {
+            const gain = 8 + Math.floor(Math.random() * 10);
+            gameState.addBag(gain);
+            streak += 1;
+            popCombo('+$' + gain + ' LANDED', '#7dffcf');
+          } else {
+            gameState.addBag(-6);
+            streak = 0;
+            popCombo('LANDED ON RED', '#ff9955');
+          }
+        }
+        break;
+      }
+    }
+
+    if (onCandle && onCandle.color === 'green') {
+      gameState.addBag(6 * dt);
+    }
+
+    if (player.position.y < -6) {
+      lose('LIQUIDITY VOID', 'You fell off the trenches entirely.');
+    }
+
+    gameState.reportEnergy(gameState.state.energy - 2.2 * dt);
+    if (gameState.state.energy <= 0) {
+      lose('BURNED OUT', 'Energy hit zero — even degens need sleep.');
+    }
+    if (gameState.state.health <= 0) {
+      lose('LIQUIDATED', 'Health hit zero after one too many rugs.');
+    }
+
+    const camTarget = new THREE.Vector3(player.position.x * 0.6, player.position.y + 3.4, player.position.z + 7.5);
+    camera.position.lerp(camTarget, Math.min(1, dt * 5));
+    camera.lookAt(player.position.x * 0.6, player.position.y + 0.6, player.position.z - 4);
+    player.rotation.y = Math.sin(elapsed * 2) * 0.05 + (targetX - player.position.x) * -0.15;
+  }
+
+  function animate() {
+    animId = requestAnimationFrame(animate);
+    const dt = Math.min(clock.getDelta(), 0.05);
+    if (!ended) update(dt);
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // ---------- TEARDOWN ----------
+  function teardown() {
+    cancelAnimationFrame(animId);
+    window.removeEventListener('keydown', keydown);
+    window.removeEventListener('keyup', keyup);
+    window.removeEventListener('resize', resize);
+    renderer.dispose();
+    root.remove();
+  }
+
+  return teardown;
+}
