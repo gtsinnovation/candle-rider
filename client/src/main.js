@@ -7,6 +7,7 @@
 import { GameState } from './core/GameState.js';
 import { SaveManager } from './core/SaveManager.js';
 import { mountHUD } from './ui/HUD.js';
+import { mountInstallPrompt } from './ui/InstallPrompt.js';
 import { mountWarRoom } from './scenes/WarRoomScene.js';
 import { mountTrenchesScene } from './scenes/paths/TrenchesScene.js';
 import { eventBus } from './core/EventBus.js';
@@ -26,6 +27,7 @@ async function boot() {
   await saveManager.load(); // populates gameState from backend/local mirror
 
   mountHUD(container, gameState);
+  mountInstallPrompt(container);
 
   // Logs every voluntary cash-out to the backend for the leaderboard.
   // Losses (rug/liquidation/burnout) aren't logged as run results — they

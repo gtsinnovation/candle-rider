@@ -11,7 +11,29 @@
 import { PATHS, heroArtUrl } from '@candle-rider/shared';
 import { eventBus } from '../core/EventBus.js';
 
+let stylesInjected = false;
+function injectResponsiveStyles() {
+  if (stylesInjected) return;
+  stylesInjected = true;
+  const style = document.createElement('style');
+  style.textContent = `
+    @media (max-width: 768px) {
+      #war-room {
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        justify-content: flex-start !important;
+        padding: 20px 20px 20px 170px !important;
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+      }
+      #war-room > div { scroll-snap-align: center; flex-shrink: 0; }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 export function mountWarRoom(container, gameState, onSelectPath) {
+  injectResponsiveStyles();
   const el = document.createElement('div');
   el.id = 'war-room';
   el.style.cssText = `

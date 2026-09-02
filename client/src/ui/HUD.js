@@ -5,7 +5,22 @@
 
 import { eventBus } from '../core/EventBus.js';
 
+let stylesInjected = false;
+function injectResponsiveStyles() {
+  if (stylesInjected) return;
+  stylesInjected = true;
+  const style = document.createElement('style');
+  style.textContent = `
+    @media (max-width: 480px) {
+      #hud { width: 150px !important; padding: 10px !important; font-size: 10px !important; }
+      #hud .hud-title { font-size: 12px !important; }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 export function mountHUD(container, gameState) {
+  injectResponsiveStyles();
   const el = document.createElement('div');
   el.id = 'hud';
   el.style.cssText = `
@@ -18,7 +33,7 @@ export function mountHUD(container, gameState) {
 
   function render(state) {
     el.innerHTML = `
-      <div style="font-size:16px;font-weight:700;margin-bottom:6px;">DEGEN WARRIOR LVL ${state.level}</div>
+      <div class="hud-title" style="font-size:16px;font-weight:700;margin-bottom:6px;">DEGEN WARRIOR LVL ${state.level}</div>
       <div>Bag: $${Math.round(state.bag ?? 0).toLocaleString()}</div>
       <div>PNL: ${(state.pnl ?? 0).toFixed(2)}</div>
       <div>Health: ${Math.round(state.health)}%</div>

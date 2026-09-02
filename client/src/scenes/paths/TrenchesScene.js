@@ -73,7 +73,10 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     position:absolute; bottom:20px; right:22px; font-size:11px; color:#6f6f95;
     text-align:right; line-height:1.5; font-family: system-ui, sans-serif; z-index:5;
   `;
-  hint.innerHTML = 'A / D or ← → : change lane<br/>SPACE or LEFT CLICK : jump<br/>ESC : cash out';
+  const isTouchDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || navigator.maxTouchPoints > 0;
+  hint.innerHTML = isTouchDevice
+    ? 'Swipe ← / → : change lane<br/>Tap : jump'
+    : 'A / D or ← → : change lane<br/>SPACE or LEFT CLICK : jump<br/>ESC : cash out';
   root.appendChild(hint);
 
   // Debug readout — shows live physics state so a single screenshot can
@@ -86,6 +89,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     background:rgba(0,0,0,.55); border:1px solid #333; border-radius:6px;
     padding:6px 10px; font-family:monospace; font-size:11px; color:#9f9;
     line-height:1.5; pointer-events:none;
+    ${window.innerWidth < 480 ? 'display:none;' : ''}
   `;
   root.appendChild(debugBox);
 
@@ -137,7 +141,9 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     font-size:12px; color:#9a9ac0; text-align:center; z-index:6;
     font-family: system-ui, sans-serif; pointer-events:none;
   `;
-  roomHint.innerHTML = 'Drag to look around · Click a coin (or ←/→ + Enter) to ape in and start the run';
+  roomHint.innerHTML = isTouchDevice
+    ? 'Drag to look around · Tap a coin to ape in and start the run'
+    : 'Drag to look around · Click a coin (or ←/→ + Enter) to ape in and start the run';
   root.appendChild(roomHint);
 
   const coinLabel = document.createElement('div');
@@ -172,6 +178,27 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   `;
   pauseHint.textContent = 'P — pause';
   root.appendChild(pauseHint);
+
+  // Real on-screen buttons for Pause and Cash Out — mobile has no P/Escape
+  // keys at all, so these aren't just a mobile nicety, they're required for
+  // the game to be usable there. Desktop keyboard shortcuts still work too.
+  const touchButtonRow = document.createElement('div');
+  touchButtonRow.style.cssText = `
+    position:absolute; top:110px; right:22px; z-index:6; display:flex; gap:8px;
+  `;
+  touchButtonRow.innerHTML = `
+    <button id="tr-pause-btn" style="background:rgba(20,20,40,.75);color:#eef0ff;border:1px solid #3a3a6f;border-radius:7px;padding:8px 12px;font-size:16px;cursor:pointer;font-family:system-ui,sans-serif;">⏸</button>
+    <button id="tr-cashout-btn" style="background:rgba(125,255,207,.15);color:#7dffcf;border:1px solid #7dffcf;border-radius:7px;padding:8px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:system-ui,sans-serif;">CASH OUT</button>
+  `;
+  root.appendChild(touchButtonRow);
+  touchButtonRow.querySelector('#tr-pause-btn').addEventListener('click', () => {
+    if (!started || ended) return;
+    paused ? resumeGame() : pauseGame();
+  });
+  touchButtonRow.querySelector('#tr-cashout-btn').addEventListener('click', () => {
+    if (!started || paused || ended) return;
+    cashOut();
+  });
 
   const idleWarning = document.createElement('div');
   idleWarning.style.cssText = `
@@ -569,6 +596,42 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   }
   renderer.domElement.addEventListener('mousedown', onGameplayClick);
 
+  // Touch controls — mobile has no keyboard, so lane-change and jump need
+  // real gesture equivalents: swipe left/right for lanes, tap for jump.
+  // Gated the same way keyboard/mouse gameplay input is (must be started,
+  // not paused/ended, and not still in the coin room — touch-drag in the
+  // room is for orbiting the camera via the existing pointer events).
+  let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+  const SWIPE_THRESHOLD = 40;   // px — shorter swipes don't count, avoids misreads from a shaky tap
+  const TAP_MAX_MOVEMENT = 15;  // px — more movement than this isn't a tap, it's a swipe attempt
+  const TAP_MAX_DURATION = 250; // ms — longer holds aren't treated as a tap
+
+  function onTouchStart(e) {
+    if (!started || paused || ended || roomActive) return;
+    const t = e.touches[0];
+    touchStartX = t.clientX;
+    touchStartY = t.clientY;
+    touchStartTime = performance.now();
+    lastInputTime = performance.now();
+  }
+  function onTouchEnd(e) {
+    if (!started || paused || ended || roomActive) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStartX;
+    const dy = t.clientY - touchStartY;
+    const duration = performance.now() - touchStartTime;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist < TAP_MAX_MOVEMENT && duration < TAP_MAX_DURATION) {
+      tryJump();
+    } else if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
+      if (dx < 0 && laneIndex > 0) laneIndex--;
+      if (dx > 0 && laneIndex < 2) laneIndex++;
+    }
+  }
+  renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: true });
+  renderer.domElement.addEventListener('touchend', onTouchEnd, { passive: true });
+
   function updateLaneDots() {
     laneIndicator.querySelectorAll('.lane-dot').forEach((d, i) => d.classList.toggle('active', i === laneIndex));
   }
@@ -811,6 +874,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     renderer.domElement.removeEventListener('wheel', onWheel);
     renderer.domElement.removeEventListener('click', onCoinClick);
     renderer.domElement.removeEventListener('mousedown', onGameplayClick);
+    renderer.domElement.removeEventListener('touchstart', onTouchStart);
+    renderer.domElement.removeEventListener('touchend', onTouchEnd);
     coinMeshes.forEach((c) => {
       c.disc.geometry.dispose();
       c.disc.material.dispose();

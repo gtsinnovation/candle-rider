@@ -2,15 +2,33 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Candle Rider — Degen Warrior</title>
   <link rel="manifest" href="/manifest.json" />
   <meta name="theme-color" content="#7dffcf" />
   <link rel="icon" href="/icon-192.png" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
+  <!-- Mobile PWA: makes "Add to Home Screen" launch in standalone app mode
+       (no browser chrome) on both iOS Safari and Android Chrome. -->
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Candle Rider" />
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; background: #050510; overflow: hidden; }
-    #app { width: 100vw; height: 100vh; }
+    html, body {
+      margin: 0; padding: 0; height: 100%; background: #050510;
+      overflow: hidden;
+      overscroll-behavior: none;   /* no pull-to-refresh / rubber-band scroll fighting swipe controls */
+      touch-action: none;          /* no browser pinch-zoom/double-tap-zoom/pan gestures over the game */
+      -webkit-user-select: none; user-select: none; /* no accidental text selection on long-press */
+      -webkit-tap-highlight-color: transparent;
+    }
+    #app {
+      width: 100vw; height: 100vh;
+      /* safe-area insets keep UI clear of notches/home-indicator bars on modern phones */
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+      box-sizing: border-box;
+    }
   </style>
 </head>
 <body>
