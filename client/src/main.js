@@ -65,3 +65,13 @@ async function boot() {
 }
 
 boot();
+
+// Register the PWA service worker (production only — skip in Vite dev mode
+// where hot-reload and a stale cache actively fight each other).
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('[main] service worker registration failed (non-fatal):', err.message);
+    });
+  });
+}

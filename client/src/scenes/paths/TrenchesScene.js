@@ -7,40 +7,25 @@
 // writing through GameState instead of a local `stats` object, and reusing
 // the global HUD (bag/health/energy/conviction) instead of drawing its own.
 //
+// Entry flow: a split-door intro reveals a free-look "trenches room" where
+// the player orbits the camera around a row of 10 memecoins and apes into
+// one to set the run's risk/speed profile — this REPLACES the old
+// Beginner/Middle/Master text-button difficulty select entirely.
+//
 // Manual cash-out is bound to Escape (Space is taken by Jump here, unlike
-// the other four paths where Space is free for cash-out).
+// the other four paths where Space is free for cash-out). P pauses.
 
 import * as THREE from 'three';
 import { eventBus } from '../../core/EventBus.js';
+import { TRENCHES_COINS, getLastCoinId, setLastCoinId, getCoinById } from './trenchesCoins.js';
 
 const LANES = [-2.4, 0, 2.4];
 const CANDLE_W = 1.5;
 const CANDLE_D = 1.6;
 const DESPAWN_Z = 6;
 const GRAVITY = -18; // partial rollback from -16 — that was floatier than the candle spacing/timing could actually support, causing jumps to overshoot past the landing window
-
-// Speed tiers, scaled off the original tuned baseline (base 9 / ramp 0.12 /
-// cap 7). Beginner is 50% of that baseline and is the default — new
-// players (or anyone re-learning the mechanic) start here. Master is
-// stacked-on-top for players who've already gotten comfortable and want
-// the original-and-then-some pace back. "Selectable by player" per design,
-// not tied to actual player level/mastery — a run-start choice, not a gate.
-const DIFFICULTY_PRESETS = {
-  // All three tiers dropped an additional 10% (on top of Beginner's
-  // original 50%-of-baseline) after playtesting felt too fast overall.
-  beginner: { label: 'Beginner', base: 4.05, ramp: 0.054, cap: 3.15 },
-  middle:   { label: 'Middle',   base: 8.1,  ramp: 0.108, cap: 6.3 },
-  master:   { label: 'Master',   base: 12.15, ramp: 0.162, cap: 9.45 },
-};
-
-const DIFFICULTY_STORAGE_KEY = 'candlerider:trenchesDifficulty';
-
-function getLastDifficulty() {
-  return localStorage.getItem(DIFFICULTY_STORAGE_KEY) || 'beginner';
-}
-function setLastDifficulty(id) {
-  try { localStorage.setItem(DIFFICULTY_STORAGE_KEY, id); } catch { /* non-fatal */ }
-}
+const IDLE_WARNING_MS = 9 * 60 * 1000;  // show a warning at 9 minutes of inactivity
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // auto-pause at 10 minutes of inactivity
 
 export function mountTrenchesScene(container, gameState, onRunEnd) {
   gameState.startRun('trenches');
@@ -120,32 +105,82 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   `;
   root.appendChild(overlay);
 
-  const difficultyOverlay = document.createElement('div');
-  difficultyOverlay.style.cssText = `
-    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-    flex-direction:column; background:rgba(3,3,10,.9); text-align:center; z-index:15;
+  // ---------- Door curtains (DOM) — split open on entry ----------
+  const doorLeft = document.createElement('div');
+  const doorRight = document.createElement('div');
+  [doorLeft, doorRight].forEach((d) => {
+    d.style.cssText = `
+      position:absolute; top:0; bottom:0; width:50%; z-index:20;
+      background:
+        repeating-linear-gradient(90deg, #0a0a18 0px, #12122a 3px, #0a0a18 6px),
+        linear-gradient(180deg, #1a1a34, #050510);
+      border-right:2px solid #3a3a6f; box-shadow: 0 0 40px rgba(125,255,207,.15);
+      transition: transform 1.3s cubic-bezier(.7,0,.2,1);
+    `;
+  });
+  doorLeft.style.left = '0';
+  doorRight.style.left = '50%';
+  doorRight.style.borderRight = 'none';
+  doorRight.style.borderLeft = '2px solid #3a3a6f';
+  root.appendChild(doorLeft);
+  root.appendChild(doorRight);
+  // Open on next frame so the CSS transition actually plays.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    doorLeft.style.transform = 'translateX(-100%)';
+    doorRight.style.transform = 'translateX(100%)';
+  }));
+
+  // ---------- Coin-room instructions + focus indicator (DOM) ----------
+  const roomHint = document.createElement('div');
+  roomHint.style.cssText = `
+    position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+    font-size:12px; color:#9a9ac0; text-align:center; z-index:6;
+    font-family: system-ui, sans-serif; pointer-events:none;
+  `;
+  roomHint.innerHTML = 'Drag to look around · Click a coin (or ←/→ + Enter) to ape in and start the run';
+  root.appendChild(roomHint);
+
+  const coinLabel = document.createElement('div');
+  coinLabel.style.cssText = `
+    position:absolute; top:40%; left:50%; transform:translate(-50%,-50%);
+    font-size:16px; font-weight:700; color:#eef0ff; text-align:center; z-index:6;
+    font-family: system-ui, sans-serif; pointer-events:none; text-shadow:0 0 10px rgba(0,0,0,.8);
+  `;
+  root.appendChild(coinLabel);
+
+  // ---------- Pause overlay (DOM) ----------
+  const pauseOverlay = document.createElement('div');
+  pauseOverlay.style.cssText = `
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    flex-direction:column; background:rgba(3,3,10,.88); text-align:center; z-index:25;
     font-family: system-ui, sans-serif;
   `;
-  const lastDifficulty = getLastDifficulty();
-  difficultyOverlay.innerHTML = `
-    <h2 style="font-size:22px;color:#7dffcf;margin:0 0 6px;text-shadow:0 0 16px rgba(125,255,207,.5);">SET YOUR PACE</h2>
-    <p style="color:#c9c9e6;font-size:13px;margin:4px 0 20px;max-width:360px;">Candle approach speed. You can change this every run — start slow while you learn the timing.</p>
-    <div id="tr-diff-btns" style="display:flex; gap:10px;"></div>
+  pauseOverlay.innerHTML = `
+    <h2 id="tr-pause-title" style="font-size:24px;color:#7dffcf;margin:0 0 6px;">PAUSED</h2>
+    <p id="tr-pause-reason" style="color:#c9c9e6;font-size:13px;margin:4px 0 18px;max-width:360px;"></p>
+    <div style="display:flex; gap:10px;">
+      <button id="tr-resume-btn" style="background:#7dffcf;color:#05100c;border:none;padding:10px 22px;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;">RESUME</button>
+      <button id="tr-exit-btn" style="background:#3a3a6f;color:#eef0ff;border:none;padding:10px 22px;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;">EXIT TO HUB</button>
+    </div>
   `;
-  const diffBtnRow = difficultyOverlay.querySelector('#tr-diff-btns');
-  Object.entries(DIFFICULTY_PRESETS).forEach(([id, preset]) => {
-    const btn = document.createElement('button');
-    const isDefault = id === lastDifficulty;
-    btn.textContent = preset.label + (id === 'beginner' ? ' (Recommended)' : '');
-    btn.style.cssText = `
-      background:${isDefault ? '#7dffcf' : '#1a1a34'}; color:${isDefault ? '#05100c' : '#eef0ff'};
-      border:1px solid #3a3a6f; padding:10px 18px; border-radius:7px; font-size:13px;
-      font-weight:700; cursor:pointer;
-    `;
-    btn.addEventListener('click', () => startWithDifficulty(id));
-    diffBtnRow.appendChild(btn);
-  });
-  root.appendChild(difficultyOverlay);
+  root.appendChild(pauseOverlay);
+
+  const pauseHint = document.createElement('div');
+  pauseHint.style.cssText = `
+    position:absolute; top:20px; left:50%; transform:translateX(-50%);
+    font-size:11px; color:#6f6f95; z-index:5; font-family: system-ui, sans-serif; pointer-events:none;
+  `;
+  pauseHint.textContent = 'P — pause';
+  root.appendChild(pauseHint);
+
+  const idleWarning = document.createElement('div');
+  idleWarning.style.cssText = `
+    position:absolute; top:60px; left:50%; transform:translateX(-50%);
+    font-size:12px; color:#ffd166; background:rgba(0,0,0,.6); padding:6px 14px;
+    border-radius:6px; z-index:6; font-family: system-ui, sans-serif;
+    display:none; pointer-events:none;
+  `;
+  root.appendChild(idleWarning);
 
   function popCombo(text, color) {
     combo.textContent = text;
@@ -174,8 +209,57 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   canvasHost.appendChild(renderer.domElement);
   resize();
   window.addEventListener('resize', resize);
-  camera.position.set(1.4, 3.4, 7.5);
-  camera.lookAt(0, 0.6, -4);
+
+  // ---------- Free-look orbit camera (room-preview phase only) ----------
+  // Hand-rolled drag-to-orbit rather than importing OrbitControls — this
+  // phase only needs yaw/pitch/zoom around a fixed room-center point, not
+  // a general-purpose controls library.
+  const orbitTarget = new THREE.Vector3(0, 1.1, -3);
+  let orbitAzimuth = 0.15;   // radians around Y
+  let orbitElevation = 0.55; // radians up from horizontal
+  let orbitRadius = 9;
+  let dragging = false;
+  let lastPointer = { x: 0, y: 0 };
+  let roomActive = true; // true until the player apes into a coin
+
+  function updateOrbitCamera() {
+    const clampedElev = Math.max(0.15, Math.min(1.3, orbitElevation));
+    camera.position.set(
+      orbitTarget.x + orbitRadius * Math.sin(orbitAzimuth) * Math.cos(clampedElev),
+      orbitTarget.y + orbitRadius * Math.sin(clampedElev),
+      orbitTarget.z + orbitRadius * Math.cos(orbitAzimuth) * Math.cos(clampedElev)
+    );
+    camera.lookAt(orbitTarget);
+  }
+  updateOrbitCamera();
+
+  function onPointerDown(e) {
+    if (!roomActive) return;
+    dragging = true;
+    lastPointer = { x: e.clientX, y: e.clientY };
+  }
+  function onPointerMove(e) {
+    if (!roomActive) return;
+    if (dragging) {
+      const dx = e.clientX - lastPointer.x;
+      const dy = e.clientY - lastPointer.y;
+      lastPointer = { x: e.clientX, y: e.clientY };
+      orbitAzimuth -= dx * 0.006;
+      orbitElevation = Math.max(0.15, Math.min(1.3, orbitElevation + dy * 0.005));
+      updateOrbitCamera();
+    }
+    updateCoinHover(e);
+  }
+  function onPointerUp() { dragging = false; }
+  function onWheel(e) {
+    if (!roomActive) return;
+    orbitRadius = Math.max(4, Math.min(16, orbitRadius + e.deltaY * 0.01));
+    updateOrbitCamera();
+  }
+  renderer.domElement.addEventListener('pointerdown', onPointerDown);
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+  renderer.domElement.addEventListener('wheel', onWheel, { passive: true });
 
   scene.add(new THREE.AmbientLight(0x30304a, 1.1));
   const dirLight = new THREE.DirectionalLight(0x9fb4ff, 0.6);
@@ -214,6 +298,83 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   groundMesh.rotation.x = -Math.PI / 2;
   groundMesh.position.y = -1.2;
   scene.add(groundMesh);
+
+  // ---------- Memecoin room — the ape-in selector that replaced the old
+  // Beginner/Middle/Master text buttons ----------
+  function makeCoinLabelTexture(coin) {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 128;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = 'rgba(0,0,0,0)';
+    ctx.fillRect(0, 0, 256, 128);
+    ctx.font = 'bold 40px system-ui, sans-serif';
+    ctx.fillStyle = '#' + coin.color.toString(16).padStart(6, '0');
+    ctx.textAlign = 'center';
+    ctx.shadowColor = 'rgba(0,0,0,.8)';
+    ctx.shadowBlur = 10;
+    ctx.fillText(coin.symbol, 128, 60);
+    ctx.font = '20px system-ui, sans-serif';
+    ctx.fillStyle = '#c9c9e6';
+    ctx.fillText(coin.name, 128, 95);
+    return new THREE.CanvasTexture(c);
+  }
+
+  const coinMeshes = TRENCHES_COINS.map((coin, i) => {
+    const x = (i - (TRENCHES_COINS.length - 1) / 2) * 1.9;
+    const group = new THREE.Group();
+    group.position.set(x, 1.1, -3);
+
+    const disc = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.55, 0.55, 0.12, 24),
+      new THREE.MeshStandardMaterial({ color: coin.color, emissive: coin.color, emissiveIntensity: 0.7, roughness: 0.35, metalness: 0.4 })
+    );
+    group.add(disc);
+
+    const labelMat = new THREE.SpriteMaterial({ map: makeCoinLabelTexture(coin), transparent: true });
+    const label = new THREE.Sprite(labelMat);
+    label.scale.set(1.6, 0.8, 1);
+    label.position.y = 0.95;
+    group.add(label);
+
+    scene.add(group);
+    return { coin, group, disc, baseY: 1.1, bobPhase: Math.random() * Math.PI * 2 };
+  });
+
+  const raycaster = new THREE.Raycaster();
+  const pointerNDC = new THREE.Vector2();
+  let hoveredCoinIndex = -1;
+  let focusedCoinIndex = Math.max(0, TRENCHES_COINS.findIndex((c) => c.id === getLastCoinId()));
+
+  function setFocusedCoin(index) {
+    focusedCoinIndex = Math.max(0, Math.min(TRENCHES_COINS.length - 1, index));
+    coinLabel.textContent = TRENCHES_COINS[focusedCoinIndex].symbol + ' — ' + TRENCHES_COINS[focusedCoinIndex].name;
+  }
+  setFocusedCoin(focusedCoinIndex);
+
+  function updateCoinHover(e) {
+    if (!roomActive) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointerNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointerNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointerNDC, camera);
+    const hits = raycaster.intersectObjects(coinMeshes.map((c) => c.disc));
+    hoveredCoinIndex = hits.length ? coinMeshes.findIndex((c) => c.disc === hits[0].object) : -1;
+    if (hoveredCoinIndex >= 0) setFocusedCoin(hoveredCoinIndex);
+  }
+
+  function onCoinClick(e) {
+    if (!roomActive) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointerNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointerNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointerNDC, camera);
+    const hits = raycaster.intersectObjects(coinMeshes.map((c) => c.disc));
+    if (hits.length) {
+      const idx = coinMeshes.findIndex((c) => c.disc === hits[0].object);
+      apeIntoCoin(TRENCHES_COINS[idx]);
+    }
+  }
+  renderer.domElement.addEventListener('click', onCoinClick);
 
   LANES.forEach((x) => {
     const geo = new THREE.PlaneGeometry(0.05, 400);
@@ -277,7 +438,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // it scrolls into range — fine at high speed, but at lower difficulty
   // speeds the player falls past the void threshold before it arrives.
   // The player is snapped onto this candle explicitly in
-  // startWithDifficulty() rather than relying on the normal landing check
+  // apeIntoCoin() rather than relying on the normal landing check
   // to catch a mid-air faller.
   const startCandle = spawnCandle(0, 1); // lane 1 = LANES[1] = 0, matches player's starting lane
 
@@ -297,25 +458,35 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   let streak = 0;
   let ended = false;
   let started = false;
-  let difficulty = DIFFICULTY_PRESETS[lastDifficulty] || DIFFICULTY_PRESETS.beginner;
+  let paused = false;
+  let difficulty = getCoinById(getLastCoinId());
   let animId = null;
   let landSquashTimer = 0; // counts down after landing, drives the squash/rebound animation
+  let lastInputTime = performance.now();
+  let idleWarningShown = false;
 
-  function startWithDifficulty(id) {
-    difficulty = DIFFICULTY_PRESETS[id] || DIFFICULTY_PRESETS.beginner;
-    setLastDifficulty(id);
+  function apeIntoCoin(coin) {
+    if (started) return; // already ape'd in, ignore repeat clicks/enters
+    difficulty = coin;
+    setLastCoinId(coin.id);
+
+    // Close the room: stop orbit control, hide the coin meshes and room UI.
+    // The camera does NOT need an explicit transition — once `started`
+    // flips true, the existing per-frame chase-cam lerp in update() will
+    // smoothly carry it from wherever the orbit left it to the normal
+    // gameplay framing on its own.
+    roomActive = false;
+    coinMeshes.forEach((c) => { c.group.visible = false; });
+    roomHint.style.display = 'none';
+    coinLabel.style.display = 'none';
 
     // Defense-in-depth: force the player back to the guaranteed starting
-    // lane/position even though input is now also gated by `started` above
-    // — belt and suspenders against any other future path that might move
-    // laneIndex before this point.
+    // lane/position regardless of any other state.
     laneIndex = 1;
     player.position.x = LANES[1];
 
     // Land the player on the guaranteed starting candle instead of letting
-    // physics begin mid-air — this is what actually fixes the "falls into
-    // the void within the first second" bug, independent of how slow the
-    // chosen difficulty's candle-approach speed is.
+    // physics begin mid-air.
     const topY = startCandle.mesh.position.y + startCandle.height / 2; // true top surface (mesh.position.y already includes the ground-offset)
     player.position.y = topY;
     velY = 0;
@@ -323,22 +494,56 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     onCandle = startCandle;
 
     // Refresh every currently-spawned candle's flip timer relative to NOW —
-    // without this, a candle's red-flip timer (set at mount time, in real
-    // wall-clock ms) could already be expired if the player spent a while
-    // on this difficulty-select screen, causing an instant "unfair" flip/
-    // damage the moment gameplay begins.
+    // avoids an unfair instant flip if the player spent a while in the room.
     const now = performance.now();
     candles.forEach((c) => {
       c.flipAt = now + 1800 + Math.random() * 2600;
     });
 
+    lastInputTime = performance.now();
     started = true;
-    difficultyOverlay.style.display = 'none';
   }
+
+  function pauseGame(reason) {
+    if (!started || ended || paused) return;
+    paused = true;
+    pauseOverlay.querySelector('#tr-pause-title').textContent = reason ? 'AUTO-PAUSED' : 'PAUSED';
+    pauseOverlay.querySelector('#tr-pause-reason').textContent = reason || 'Take your time — your run is safely frozen.';
+    pauseOverlay.style.display = 'flex';
+  }
+  function resumeGame() {
+    if (!paused) return;
+    paused = false;
+    idleWarningShown = false;
+    lastInputTime = performance.now();
+    pauseOverlay.style.display = 'none';
+  }
+  pauseOverlay.querySelector('#tr-resume-btn').addEventListener('click', resumeGame);
+  pauseOverlay.querySelector('#tr-exit-btn').addEventListener('click', () => {
+    gameState.loseRun('exited-mid-run'); // leaving mid-run without cashing out forfeits the Bag, same as any other loss
+    teardown();
+    onRunEnd();
+  });
 
   function keydown(e) {
     keys[e.code] = true;
-    if (ended || !started) return; // ignore all gameplay input until a difficulty is actually chosen
+    lastInputTime = performance.now();
+
+    if (roomActive) {
+      // Coin-room keyboard alternative to mouse click — full parity, not
+      // just a mouse-only interaction.
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') setFocusedCoin(focusedCoinIndex - 1);
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') setFocusedCoin(focusedCoinIndex + 1);
+      if (e.code === 'Enter') apeIntoCoin(TRENCHES_COINS[focusedCoinIndex]);
+      return;
+    }
+
+    if (e.code === 'KeyP' && started && !ended) {
+      paused ? resumeGame() : pauseGame();
+      return;
+    }
+    if (paused || ended || !started) return;
+
     if ((e.code === 'ArrowLeft' || e.code === 'KeyA') && laneIndex > 0) laneIndex--;
     if ((e.code === 'ArrowRight' || e.code === 'KeyD') && laneIndex < 2) laneIndex++;
     if ((e.code === 'Space' || e.code === 'ArrowUp') && !jumping) {
@@ -394,6 +599,22 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
   function update(dt) {
     elapsed += dt;
+
+    // Idle-timeout: warn at 9 minutes, auto-pause at 10. Any keydown resets
+    // lastInputTime (see keydown()), so active players never see this.
+    const idleMs = performance.now() - lastInputTime;
+    if (idleMs > IDLE_TIMEOUT_MS) {
+      pauseGame("You've been inactive for 10 minutes — auto-paused so you don't lose progress.");
+      idleWarning.style.display = 'none';
+      return;
+    } else if (idleMs > IDLE_WARNING_MS) {
+      const secsLeft = Math.ceil((IDLE_TIMEOUT_MS - idleMs) / 1000);
+      idleWarning.textContent = `Still there? Auto-pausing in ${secsLeft}s due to inactivity.`;
+      idleWarning.style.display = 'block';
+    } else if (idleWarning.style.display !== 'none') {
+      idleWarning.style.display = 'none';
+    }
+
     speed = difficulty.base + Math.min(elapsed * difficulty.ramp, difficulty.cap);
 
     // Scroll the ground texture toward the player in lockstep with the
@@ -548,7 +769,19 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   function animate() {
     animId = requestAnimationFrame(animate);
     const dt = Math.min(clock.getDelta(), 0.05);
-    if (started && !ended) update(dt);
+
+    // Coin bob animation runs regardless of game state — visible during
+    // the room phase, harmless (just hidden) once ape'd in.
+    const t = clock.getElapsedTime();
+    coinMeshes.forEach((c) => {
+      c.group.position.y = c.baseY + Math.sin(t * 1.4 + c.bobPhase) * 0.08;
+      c.group.rotation.y += dt * 0.4;
+      const isFocused = coinMeshes.indexOf(c) === focusedCoinIndex || coinMeshes.indexOf(c) === hoveredCoinIndex;
+      c.disc.material.emissiveIntensity = isFocused ? 1.3 : 0.7;
+      c.group.scale.setScalar(isFocused ? 1.12 : 1);
+    });
+
+    if (started && !ended && !paused) update(dt);
     renderer.render(scene, camera);
   }
   animate();
@@ -559,6 +792,19 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     window.removeEventListener('keydown', keydown);
     window.removeEventListener('keyup', keyup);
     window.removeEventListener('resize', resize);
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', onPointerUp);
+    renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+    renderer.domElement.removeEventListener('wheel', onWheel);
+    renderer.domElement.removeEventListener('click', onCoinClick);
+    coinMeshes.forEach((c) => {
+      c.disc.geometry.dispose();
+      c.disc.material.dispose();
+      c.group.children.forEach((child) => {
+        if (child.material?.map) child.material.map.dispose();
+        if (child.material) child.material.dispose();
+      });
+    });
     groundTexture.dispose();
     groundMat.dispose();
     groundMesh.geometry.dispose();

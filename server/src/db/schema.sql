@@ -1,14 +1,27 @@
 -- server/src/db/schema.sql
 -- SQLite is the source of truth for Candle Rider saves. Applied once at
 -- server boot (see db/client.js) — safe to run repeatedly (IF NOT EXISTS).
+--
+-- AUTH PLAN (not yet implemented): identity is currently just a
+-- client-generated UUID stored in the browser, no login required. google_id
+-- and email below are nullable placeholders anticipating a future
+-- "Sign in with Google" option for usage tracking across devices — a
+-- signed-in player's anonymous UUID would be linked to their google_id
+-- (merging any existing anonymous save), rather than replacing the id
+-- scheme entirely. Not built yet: needs real Google OAuth credentials and
+-- a /api/auth/google callback route, out of scope until requested.
 
 CREATE TABLE IF NOT EXISTS players (
   id            TEXT PRIMARY KEY,        -- client-generated UUID, no login/wallet
   display_name  TEXT NOT NULL DEFAULT 'Degen',
+  google_id     TEXT,                    -- nullable; set once Google sign-in is implemented
+  email         TEXT,                    -- nullable; from Google profile once linked
   state_json    TEXT NOT NULL,           -- full PlayerState blob, see shared/economy.js
   created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_players_google_id ON players(google_id) WHERE google_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS run_results (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
