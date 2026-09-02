@@ -220,11 +220,11 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // scene instead of showing as a black rectangle. Sprites always face
   // the camera automatically, which suits an endless-runner viewed from
   // a mostly-fixed chase angle.
-  const heroTexture = new THREE.TextureLoader().load('/assets/heroes/trenches-standing-cutout.png');
+  const heroTexture = new THREE.TextureLoader().load('/assets/heroes/trenches-back-cutout.png');
   const heroMat = new THREE.SpriteMaterial({ map: heroTexture, transparent: true });
   const heroSprite = new THREE.Sprite(heroMat);
   const HERO_HEIGHT = 2.1;
-  const HERO_ASPECT = 868 / 1326; // re-cropped tight to the character (removed ~177px of empty/shadow-fade space below the boots that was causing the sprite to float above candles)
+  const HERO_ASPECT = 841 / 1406; // back-view walking pose, matches the rear-chase camera direction
   heroSprite.scale.set(HERO_HEIGHT * HERO_ASPECT, HERO_HEIGHT, 1);
   heroSprite.position.y = HERO_HEIGHT / 2; // anchor the sprite's bottom edge at the player's ground-contact point
   player.add(heroSprite);
@@ -286,6 +286,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   let started = false;
   let difficulty = DIFFICULTY_PRESETS[lastDifficulty] || DIFFICULTY_PRESETS.beginner;
   let animId = null;
+  let landSquashTimer = 0; // counts down after landing, drives the squash/rebound animation
+  let wasJumping = false; // tracks the jumping->grounded transition to fire the squash once
 
   function startWithDifficulty(id) {
     difficulty = DIFFICULTY_PRESETS[id] || DIFFICULTY_PRESETS.beginner;
@@ -417,6 +419,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       const playerFeetY = player.position.y;
       if (sameLane && nearZ && velY <= 0 && playerFeetY <= topY + 0.35 && playerFeetY >= topY - 0.6) {
         player.position.y = topY;
+        if (jumping) landSquashTimer = 0.18; // was airborne, now landing — fire the squash
         velY = 0;
         jumping = false;
         onCandle = c;
@@ -457,7 +460,47 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     const camTarget = new THREE.Vector3(player.position.x * 0.6, player.position.y + 3.4, player.position.z + 7.5);
     camera.position.lerp(camTarget, Math.min(1, dt * 5));
     camera.lookAt(player.position.x * 0.6, player.position.y + 0.6, player.position.z - 4);
-    player.rotation.y = Math.sin(elapsed * 2) * 0.05 + (targetX - player.position.x) * -0.15;
+    // ---------- Procedural sprite animation ("juice") ----------
+    // Sprites always billboard to face the camera and ignore the parent
+    // Group's rotation.y, so a plain rotation-based lean (what was here
+    // before) had no visible effect. Real motion feedback instead comes
+    // from animating the sprite's own scale (squash/stretch) and its
+    // material's in-plane rotation (banking lean) — no new art needed.
+    const baseW = HERO_HEIGHT * HERO_ASPECT;
+    const baseH = HERO_HEIGHT;
+
+    if (landSquashTimer > 0) {
+      landSquashTimer = Math.max(0, landSquashTimer - dt);
+      // eased squash → rebound: compressed at impact, bounces slightly
+      // taller than normal on the way out, settles back to baseline.
+      const t = 1 - landSquashTimer / 0.18; // 0 at impact -> 1 as it settles
+      const squash = t < 0.4
+        ? 1 - 0.22 * (t / 0.4)          // compress
+        : 0.78 + 0.28 * ((t - 0.4) / 0.6); // rebound past 1.0 briefly, then settle
+      heroSprite.scale.set(baseW * (2 - squash), baseH * squash, 1);
+      heroSprite.position.y = HERO_HEIGHT / 2;
+    } else if (jumping) {
+      // airborne stretch, proportional to how fast it's currently moving
+      // vertically — snappier at the top of a jump's push, gentler near
+      // the peak/fall.
+      const stretch = 1 + Math.min(0.16, Math.abs(velY) * 0.01);
+      heroSprite.scale.set(baseW / stretch, baseH * stretch, 1);
+      heroSprite.position.y = HERO_HEIGHT / 2;
+    } else {
+      // grounded running bob — small rhythmic bounce tied to elapsed time
+      // and current scroll speed, so the bob visually speeds up as the
+      // run gets faster.
+      const bobRate = 6 + speed * 0.35;
+      const bob = Math.sin(elapsed * bobRate) * 0.035;
+      heroSprite.scale.set(baseW, baseH * (1 + bob), 1);
+      heroSprite.position.y = HERO_HEIGHT / 2 + Math.abs(bob) * 0.4;
+    }
+
+    // Bank/lean into lane changes — SpriteMaterial.rotation is an in-plane
+    // (view-axis) roll, the one rotation a billboard sprite actually
+    // respects.
+    const leanTarget = (targetX - player.position.x) * -0.35;
+    heroMat.rotation += (leanTarget - heroMat.rotation) * Math.min(1, dt * 8);
   }
 
   function animate() {
