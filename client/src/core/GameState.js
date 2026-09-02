@@ -37,6 +37,15 @@ export class GameState {
       minHealthSeen: 100,
       startedAt: Date.now(),
     };
+    // Health and Energy reset to full at the start of every run — these
+    // are run-scoped resources, not persistent damage. Without this, a
+    // run that ends via loss (health/energy hit 0) would carry that same
+    // 0 value into the NEXT run's opening frame, which instantly re-loses
+    // it before the player can do anything — the same "unwinnable from
+    // frame one" bug class as the earlier void-fall timing issue, just
+    // triggered by permanent-state carryover instead of spawn timing.
+    this.state.health = 100;
+    this.state.energy = 100;
     // state.bag is a LIVE MIRROR of currentRun.bag for HUD display only —
     // the permanent record. It's zeroed at the start/end of every run;
     // the real "did this run's earnings survive" answer is whether

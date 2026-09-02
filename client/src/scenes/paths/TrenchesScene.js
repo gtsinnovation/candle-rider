@@ -224,7 +224,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   const heroMat = new THREE.SpriteMaterial({ map: heroTexture, transparent: true });
   const heroSprite = new THREE.Sprite(heroMat);
   const HERO_HEIGHT = 2.1;
-  const HERO_ASPECT = 1024 / 1536; // standing-pose art dimensions, standalone (no attached background art/effects)
+  const HERO_ASPECT = 868 / 1326; // re-cropped tight to the character (removed ~177px of empty/shadow-fade space below the boots that was causing the sprite to float above candles)
   heroSprite.scale.set(HERO_HEIGHT * HERO_ASPECT, HERO_HEIGHT, 1);
   heroSprite.position.y = HERO_HEIGHT / 2; // anchor the sprite's bottom edge at the player's ground-contact point
   player.add(heroSprite);
