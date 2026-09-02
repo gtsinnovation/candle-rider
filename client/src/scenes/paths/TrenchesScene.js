@@ -17,7 +17,7 @@ const LANES = [-2.4, 0, 2.4];
 const CANDLE_W = 1.5;
 const CANDLE_D = 1.6;
 const DESPAWN_Z = 6;
-const GRAVITY = -16; // lowered from -20 for a floatier, more readable arc
+const GRAVITY = -18; // partial rollback from -16 — that was floatier than the candle spacing/timing could actually support, causing jumps to overshoot past the landing window
 
 // Speed tiers, scaled off the original tuned baseline (base 9 / ramp 0.12 /
 // cap 7). Beginner is 50% of that baseline and is the default — new
@@ -303,7 +303,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     // physics begin mid-air — this is what actually fixes the "falls into
     // the void within the first second" bug, independent of how slow the
     // chosen difficulty's candle-approach speed is.
-    const topY = startCandle.mesh.position.y + startCandle.height / 2 - 1.2;
+    const topY = startCandle.mesh.position.y + startCandle.height / 2; // true top surface (mesh.position.y already includes the ground-offset)
     player.position.y = topY;
     velY = 0;
     jumping = false;
@@ -330,7 +330,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     if ((e.code === 'ArrowRight' || e.code === 'KeyD') && laneIndex < 2) laneIndex++;
     if ((e.code === 'Space' || e.code === 'ArrowUp') && !jumping) {
       jumping = true;
-      velY = 8.5; // raised from 7.2 — now comfortably clears the full candle height range (0.6–2.2)
+      velY = 7.5; // retuned alongside gravity — still clears the full candle height range, but with less airtime overshoot past the landing window
     }
     if (e.code === 'Escape') cashOut();
   }
@@ -430,8 +430,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     onCandle = null;
     for (const c of candles) {
       const sameLane = Math.abs(c.mesh.position.x - player.position.x) < CANDLE_W / 2;
-      const nearZ = Math.abs(c.mesh.position.z - player.position.z) < CANDLE_D / 2 + 0.15;
-      const topY = c.mesh.position.y + c.height / 2 - 1.2;
+      const nearZ = Math.abs(c.mesh.position.z - player.position.z) < CANDLE_D / 2 + 0.5; // widened from +0.15 — jump airtime now often outlasts how long a single candle stays in range, so the landing window needed to be more forgiving
+      const topY = c.mesh.position.y + c.height / 2; // true top surface (mesh.position.y already includes the ground-offset — was double-subtracting 1.2 before)
       const playerFeetY = player.position.y;
       if (sameLane && nearZ && velY <= 0 && playerFeetY <= topY + 0.35 && playerFeetY >= topY - 0.6) {
         player.position.y = topY;
