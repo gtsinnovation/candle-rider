@@ -17,7 +17,7 @@ const LANES = [-2.4, 0, 2.4];
 const CANDLE_W = 1.5;
 const CANDLE_D = 1.6;
 const DESPAWN_Z = 6;
-const GRAVITY = -20;
+const GRAVITY = -16; // lowered from -20 for a floatier, more readable arc
 
 // Speed tiers, scaled off the original tuned baseline (base 9 / ramp 0.12 /
 // cap 7). Beginner is 50% of that baseline and is the default — new
@@ -213,12 +213,22 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
   let laneIndex = 1;
   const player = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x0d3d34, emissive: 0x18ffcf, emissiveIntensity: 0.9, roughness: 0.35 });
-  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.4, 0.9, 12), bodyMat);
-  torso.position.y = 0.55;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 16), bodyMat);
-  head.position.y = 1.15;
-  player.add(torso, head);
+
+  // The player is the actual Trenches Degen Warrior hero art (not a
+  // generic placeholder shape) — same asset used on the War Room card,
+  // run through an alpha cutout so it billboards cleanly against the 3D
+  // scene instead of showing as a black rectangle. Sprites always face
+  // the camera automatically, which suits an endless-runner viewed from
+  // a mostly-fixed chase angle.
+  const heroTexture = new THREE.TextureLoader().load('/assets/heroes/trenches-standing-cutout.png');
+  const heroMat = new THREE.SpriteMaterial({ map: heroTexture, transparent: true });
+  const heroSprite = new THREE.Sprite(heroMat);
+  const HERO_HEIGHT = 2.1;
+  const HERO_ASPECT = 1024 / 1536; // standing-pose art dimensions, standalone (no attached background art/effects)
+  heroSprite.scale.set(HERO_HEIGHT * HERO_ASPECT, HERO_HEIGHT, 1);
+  heroSprite.position.y = HERO_HEIGHT / 2; // anchor the sprite's bottom edge at the player's ground-contact point
+  player.add(heroSprite);
+
   player.position.set(LANES[laneIndex], 0, 0);
   scene.add(player);
   const playerGlow = new THREE.PointLight(0x18ffcf, 1.2, 6);
@@ -233,18 +243,30 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     return new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.55, roughness: 0.4 });
   }
 
-  function spawnCandle(z) {
-    const lane = Math.floor(Math.random() * 3);
+  function spawnCandle(z, forcedLane) {
+    const lane = forcedLane !== undefined ? forcedLane : Math.floor(Math.random() * 3);
     const height = 0.6 + Math.random() * 1.6;
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(CANDLE_W, height, CANDLE_D), candleMaterial(GREEN));
     mesh.position.set(LANES[lane], height / 2 - 1.2, z);
     scene.add(mesh);
-    candles.push({
+    const candle = {
       mesh, lane, height, color: 'green',
       flipAt: performance.now() + 1800 + Math.random() * 2600,
       scored: false,
-    });
+    };
+    candles.push(candle);
+    return candle;
   }
+
+  // Guaranteed starting platform, directly under the player's spawn lane at
+  // z=0. Without this, the nearest candle from the random seed loop below
+  // starts at z=-4 and the player free-falls with nothing to land on until
+  // it scrolls into range — fine at high speed, but at lower difficulty
+  // speeds the player falls past the void threshold before it arrives.
+  // The player is snapped onto this candle explicitly in
+  // startWithDifficulty() rather than relying on the normal landing check
+  // to catch a mid-air faller.
+  const startCandle = spawnCandle(0, 1); // lane 1 = LANES[1] = 0, matches player's starting lane
 
   let cursorZ = -4;
   for (let i = 0; i < 24; i++) {
@@ -268,6 +290,17 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   function startWithDifficulty(id) {
     difficulty = DIFFICULTY_PRESETS[id] || DIFFICULTY_PRESETS.beginner;
     setLastDifficulty(id);
+
+    // Land the player on the guaranteed starting candle instead of letting
+    // physics begin mid-air — this is what actually fixes the "falls into
+    // the void within the first second" bug, independent of how slow the
+    // chosen difficulty's candle-approach speed is.
+    const topY = startCandle.mesh.position.y + startCandle.height / 2 - 1.2;
+    player.position.y = topY;
+    velY = 0;
+    jumping = false;
+    onCandle = startCandle;
+
     started = true;
     difficultyOverlay.style.display = 'none';
   }
@@ -279,7 +312,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     if ((e.code === 'ArrowRight' || e.code === 'KeyD') && laneIndex < 2) laneIndex++;
     if ((e.code === 'Space' || e.code === 'ArrowUp') && !jumping) {
       jumping = true;
-      velY = 7.2;
+      velY = 8.5; // raised from 7.2 — now comfortably clears the full candle height range (0.6–2.2)
     }
     if (e.code === 'Escape') cashOut();
   }
@@ -444,6 +477,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     groundTexture.dispose();
     groundMat.dispose();
     groundMesh.geometry.dispose();
+    heroTexture.dispose();
+    heroMat.dispose();
     renderer.dispose();
     root.remove();
   }
