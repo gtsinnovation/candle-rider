@@ -287,11 +287,17 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   let difficulty = DIFFICULTY_PRESETS[lastDifficulty] || DIFFICULTY_PRESETS.beginner;
   let animId = null;
   let landSquashTimer = 0; // counts down after landing, drives the squash/rebound animation
-  let wasJumping = false; // tracks the jumping->grounded transition to fire the squash once
 
   function startWithDifficulty(id) {
     difficulty = DIFFICULTY_PRESETS[id] || DIFFICULTY_PRESETS.beginner;
     setLastDifficulty(id);
+
+    // Defense-in-depth: force the player back to the guaranteed starting
+    // lane/position even though input is now also gated by `started` above
+    // — belt and suspenders against any other future path that might move
+    // laneIndex before this point.
+    laneIndex = 1;
+    player.position.x = LANES[1];
 
     // Land the player on the guaranteed starting candle instead of letting
     // physics begin mid-air — this is what actually fixes the "falls into
@@ -303,13 +309,23 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     jumping = false;
     onCandle = startCandle;
 
+    // Refresh every currently-spawned candle's flip timer relative to NOW —
+    // without this, a candle's red-flip timer (set at mount time, in real
+    // wall-clock ms) could already be expired if the player spent a while
+    // on this difficulty-select screen, causing an instant "unfair" flip/
+    // damage the moment gameplay begins.
+    const now = performance.now();
+    candles.forEach((c) => {
+      c.flipAt = now + 1800 + Math.random() * 2600;
+    });
+
     started = true;
     difficultyOverlay.style.display = 'none';
   }
 
   function keydown(e) {
     keys[e.code] = true;
-    if (ended) return;
+    if (ended || !started) return; // ignore all gameplay input until a difficulty is actually chosen
     if ((e.code === 'ArrowLeft' || e.code === 'KeyA') && laneIndex > 0) laneIndex--;
     if ((e.code === 'ArrowRight' || e.code === 'KeyD') && laneIndex < 2) laneIndex++;
     if ((e.code === 'Space' || e.code === 'ArrowUp') && !jumping) {
