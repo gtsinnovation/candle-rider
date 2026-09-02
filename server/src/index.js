@@ -1,5 +1,5 @@
 // server/src/index.js
-//
+
 // Native (non-Docker) Node server for Candle Rider. Runs under systemd on
 // the Hetzner box, listens on 0.0.0.0:3001, and is reverse-proxied by the
 // existing Caddy container via `host.docker.internal:3001` for
