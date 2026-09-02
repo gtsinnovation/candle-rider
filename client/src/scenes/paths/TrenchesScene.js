@@ -73,7 +73,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     position:absolute; bottom:20px; right:22px; font-size:11px; color:#6f6f95;
     text-align:right; line-height:1.5; font-family: system-ui, sans-serif; z-index:5;
   `;
-  hint.innerHTML = 'A / D or ← → : change lane<br/>SPACE : jump<br/>ESC : cash out';
+  hint.innerHTML = 'A / D or ← → : change lane<br/>SPACE or LEFT CLICK : jump<br/>ESC : cash out';
   root.appendChild(hint);
 
   // Debug readout — shows live physics state so a single screenshot can
@@ -546,15 +546,28 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
     if ((e.code === 'ArrowLeft' || e.code === 'KeyA') && laneIndex > 0) laneIndex--;
     if ((e.code === 'ArrowRight' || e.code === 'KeyD') && laneIndex < 2) laneIndex++;
-    if ((e.code === 'Space' || e.code === 'ArrowUp') && !jumping) {
-      jumping = true;
-      velY = 7.5; // retuned alongside gravity — still clears the full candle height range, but with less airtime overshoot past the landing window
-    }
+    if (e.code === 'Space' || e.code === 'ArrowUp') tryJump();
     if (e.code === 'Escape') cashOut();
   }
   function keyup(e) { keys[e.code] = false; }
   window.addEventListener('keydown', keydown);
   window.addEventListener('keyup', keyup);
+
+  function tryJump() {
+    if (jumping) return;
+    jumping = true;
+    velY = 7.5; // retuned alongside gravity — still clears the full candle height range, but with less airtime overshoot past the landing window
+  }
+
+  // Left-click also jumps during gameplay — mirrors Space exactly via the
+  // shared tryJump(). Gated the same way keyboard jump input is (must be
+  // started, not paused/ended, and not still in the coin room — clicking
+  // in the room is for apeing into a coin, not jumping).
+  function onGameplayClick() {
+    if (!started || paused || ended || roomActive) return;
+    tryJump();
+  }
+  renderer.domElement.addEventListener('mousedown', onGameplayClick);
 
   function updateLaneDots() {
     laneIndicator.querySelectorAll('.lane-dot').forEach((d, i) => d.classList.toggle('active', i === laneIndex));
@@ -797,6 +810,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     renderer.domElement.removeEventListener('pointerdown', onPointerDown);
     renderer.domElement.removeEventListener('wheel', onWheel);
     renderer.domElement.removeEventListener('click', onCoinClick);
+    renderer.domElement.removeEventListener('mousedown', onGameplayClick);
     coinMeshes.forEach((c) => {
       c.disc.geometry.dispose();
       c.disc.material.dispose();
