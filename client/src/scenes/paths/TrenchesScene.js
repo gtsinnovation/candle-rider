@@ -91,6 +91,19 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   hint.innerHTML = 'A / D or ← → : change lane<br/>SPACE : jump<br/>ESC : cash out';
   root.appendChild(hint);
 
+  // Debug readout — shows live physics state so a single screenshot can
+  // pinpoint exactly what was happening at the moment of any future issue
+  // (grounded or falling, which lane, current velocity/speed) instead of
+  // needing to reverse-engineer it from gameplay video.
+  const debugBox = document.createElement('div');
+  debugBox.style.cssText = `
+    position:absolute; top:20px; right:22px; z-index:5;
+    background:rgba(0,0,0,.55); border:1px solid #333; border-radius:6px;
+    padding:6px 10px; font-family:monospace; font-size:11px; color:#9f9;
+    line-height:1.5; pointer-events:none;
+  `;
+  root.appendChild(debugBox);
+
   const overlay = document.createElement('div');
   overlay.style.cssText = `
     position:absolute; inset:0; display:none; align-items:center; justify-content:center;
@@ -430,7 +443,14 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     onCandle = null;
     for (const c of candles) {
       const sameLane = Math.abs(c.mesh.position.x - player.position.x) < CANDLE_W / 2;
-      const nearZ = Math.abs(c.mesh.position.z - player.position.z) < CANDLE_D / 2 + 0.5; // widened from +0.15 — jump airtime now often outlasts how long a single candle stays in range, so the landing window needed to be more forgiving
+      // Tolerance scales with current scroll speed rather than a fixed
+      // distance — a fixed buffer only gives a fixed TIME window (buffer /
+      // speed), which shrinks as speed increases and didn't reliably
+      // outlast jump airtime (~0.83s) even at Beginner. Scaling by speed
+      // keeps the in-range TIME window consistent (~1.1s) regardless of
+      // difficulty tier or the speed ramp within a run, so jumping straight
+      // up reliably lands back on the same candle you took off from.
+      const nearZ = Math.abs(c.mesh.position.z - player.position.z) < CANDLE_D / 2 + speed * 0.55;
       const topY = c.mesh.position.y + c.height / 2; // true top surface (mesh.position.y already includes the ground-offset — was double-subtracting 1.2 before)
       const playerFeetY = player.position.y;
       if (sameLane && nearZ && velY <= 0 && playerFeetY <= topY + 0.35 && playerFeetY >= topY - 0.6) {
@@ -517,6 +537,12 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     // respects.
     const leanTarget = (targetX - player.position.x) * -0.35;
     heroMat.rotation += (leanTarget - heroMat.rotation) * Math.min(1, dt * 8);
+
+    debugBox.textContent =
+      `lane: ${laneIndex}  grounded: ${!jumping}\n` +
+      `velY: ${velY.toFixed(2)}  y: ${player.position.y.toFixed(2)}\n` +
+      `speed: ${speed.toFixed(2)}  onCandle: ${onCandle ? onCandle.color : 'none'}\n` +
+      `elapsed: ${elapsed.toFixed(1)}s`;
   }
 
   function animate() {
