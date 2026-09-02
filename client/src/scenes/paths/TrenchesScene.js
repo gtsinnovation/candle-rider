@@ -19,6 +19,27 @@ const CANDLE_D = 1.6;
 const DESPAWN_Z = 6;
 const GRAVITY = -20;
 
+// Speed tiers, scaled off the original tuned baseline (base 9 / ramp 0.12 /
+// cap 7). Beginner is 50% of that baseline and is the default — new
+// players (or anyone re-learning the mechanic) start here. Master is
+// stacked-on-top for players who've already gotten comfortable and want
+// the original-and-then-some pace back. "Selectable by player" per design,
+// not tied to actual player level/mastery — a run-start choice, not a gate.
+const DIFFICULTY_PRESETS = {
+  beginner: { label: 'Beginner', base: 4.5, ramp: 0.06, cap: 3.5 },
+  middle:   { label: 'Middle',   base: 9,   ramp: 0.12, cap: 7 },
+  master:   { label: 'Master',   base: 13.5, ramp: 0.18, cap: 10.5 },
+};
+
+const DIFFICULTY_STORAGE_KEY = 'candlerider:trenchesDifficulty';
+
+function getLastDifficulty() {
+  return localStorage.getItem(DIFFICULTY_STORAGE_KEY) || 'beginner';
+}
+function setLastDifficulty(id) {
+  try { localStorage.setItem(DIFFICULTY_STORAGE_KEY, id); } catch { /* non-fatal */ }
+}
+
 export function mountTrenchesScene(container, gameState, onRunEnd) {
   gameState.startRun('trenches');
 
@@ -84,6 +105,33 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   `;
   root.appendChild(overlay);
 
+  const difficultyOverlay = document.createElement('div');
+  difficultyOverlay.style.cssText = `
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    flex-direction:column; background:rgba(3,3,10,.9); text-align:center; z-index:15;
+    font-family: system-ui, sans-serif;
+  `;
+  const lastDifficulty = getLastDifficulty();
+  difficultyOverlay.innerHTML = `
+    <h2 style="font-size:22px;color:#7dffcf;margin:0 0 6px;text-shadow:0 0 16px rgba(125,255,207,.5);">SET YOUR PACE</h2>
+    <p style="color:#c9c9e6;font-size:13px;margin:4px 0 20px;max-width:360px;">Candle approach speed. You can change this every run — start slow while you learn the timing.</p>
+    <div id="tr-diff-btns" style="display:flex; gap:10px;"></div>
+  `;
+  const diffBtnRow = difficultyOverlay.querySelector('#tr-diff-btns');
+  Object.entries(DIFFICULTY_PRESETS).forEach(([id, preset]) => {
+    const btn = document.createElement('button');
+    const isDefault = id === lastDifficulty;
+    btn.textContent = preset.label + (id === 'beginner' ? ' (Recommended)' : '');
+    btn.style.cssText = `
+      background:${isDefault ? '#7dffcf' : '#1a1a34'}; color:${isDefault ? '#05100c' : '#eef0ff'};
+      border:1px solid #3a3a6f; padding:10px 18px; border-radius:7px; font-size:13px;
+      font-weight:700; cursor:pointer;
+    `;
+    btn.addEventListener('click', () => startWithDifficulty(id));
+    diffBtnRow.appendChild(btn);
+  });
+  root.appendChild(difficultyOverlay);
+
   function popCombo(text, color) {
     combo.textContent = text;
     combo.style.color = color || '#ffd166';
@@ -111,6 +159,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   canvasHost.appendChild(renderer.domElement);
   resize();
   window.addEventListener('resize', resize);
+  camera.position.set(1.4, 3.4, 7.5);
+  camera.lookAt(0, 0.6, -4);
 
   scene.add(new THREE.AmbientLight(0x30304a, 1.1));
   const dirLight = new THREE.DirectionalLight(0x9fb4ff, 0.6);
@@ -179,11 +229,20 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   let velY = 0;
   let jumping = true;
   let onCandle = null;
-  let speed = 9;
+  let speed = 6; // base scroll speed — lowered from 9 for a gentler start
   let elapsed = 0;
   let streak = 0;
   let ended = false;
+  let started = false;
+  let difficulty = DIFFICULTY_PRESETS[lastDifficulty] || DIFFICULTY_PRESETS.beginner;
   let animId = null;
+
+  function startWithDifficulty(id) {
+    difficulty = DIFFICULTY_PRESETS[id] || DIFFICULTY_PRESETS.beginner;
+    setLastDifficulty(id);
+    started = true;
+    difficultyOverlay.style.display = 'none';
+  }
 
   function keydown(e) {
     keys[e.code] = true;
@@ -243,7 +302,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
   function update(dt) {
     elapsed += dt;
-    speed = 9 + Math.min(elapsed * 0.12, 7);
+    speed = difficulty.base + Math.min(elapsed * difficulty.ramp, difficulty.cap);
 
     const targetX = LANES[laneIndex];
     player.position.x += (targetX - player.position.x) * Math.min(1, dt * 12);
@@ -337,7 +396,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   function animate() {
     animId = requestAnimationFrame(animate);
     const dt = Math.min(clock.getDelta(), 0.05);
-    if (!ended) update(dt);
+    if (started && !ended) update(dt);
     renderer.render(scene, camera);
   }
   animate();
