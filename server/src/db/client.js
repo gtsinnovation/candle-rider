@@ -18,4 +18,18 @@ db.pragma('journal_mode = WAL'); // safer under concurrent reads/writes, standar
 const schemaPath = path.join(__dirname, 'schema.sql');
 db.exec(fs.readFileSync(schemaPath, 'utf8'));
 
+// Migration: add google_id/email to an EXISTING players table that
+// predates those columns. SQLite has no "ADD COLUMN IF NOT EXISTS", so we
+// check what's actually there via PRAGMA table_info first — this is what
+// CREATE TABLE IF NOT EXISTS in schema.sql can't do, since it's a no-op
+// against a table that already exists from before this migration was added.
+const existingColumns = db.prepare("PRAGMA table_info(players)").all().map((c) => c.name);
+if (!existingColumns.includes('google_id')) {
+  db.exec('ALTER TABLE players ADD COLUMN google_id TEXT');
+}
+if (!existingColumns.includes('email')) {
+  db.exec('ALTER TABLE players ADD COLUMN email TEXT');
+}
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_players_google_id ON players(google_id) WHERE google_id IS NOT NULL');
+
 export default db;

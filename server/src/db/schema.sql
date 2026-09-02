@@ -21,7 +21,11 @@ CREATE TABLE IF NOT EXISTS players (
   updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_players_google_id ON players(google_id) WHERE google_id IS NOT NULL;
+-- NOTE: the google_id/email columns above only apply to a BRAND NEW
+-- database file. CREATE TABLE IF NOT EXISTS is a no-op against an existing
+-- players table from before these columns were added — that migration
+-- (ALTER TABLE ADD COLUMN + the unique index) happens programmatically in
+-- db/client.js instead, since SQLite has no "ADD COLUMN IF NOT EXISTS".
 
 CREATE TABLE IF NOT EXISTS run_results (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,

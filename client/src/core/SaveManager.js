@@ -8,6 +8,7 @@
 
 import { api } from '../api/client.js';
 import { eventBus } from './EventBus.js';
+import { DEFAULT_PLAYER_STATE } from '@candle-rider/shared';
 
 const PLAYER_ID_KEY = 'candlerider:playerId';
 const STATE_MIRROR_KEY = 'candlerider:stateMirror';
@@ -36,7 +37,11 @@ export class SaveManager {
 
   // Loads from backend first (source of truth); falls back to the
   // localStorage mirror if the network is unavailable so the game still
-  // boots offline.
+  // boots offline; falls back to DEFAULT_PLAYER_STATE if there's no mirror
+  // either (first-ever visit on this device, API unreachable) — without
+  // this last fallback, a brand-new device with no network left gameState
+  // as null, which crashed the HUD/War Room with nothing on screen and no
+  // visible error.
   async load() {
     try {
       const { state } = await api.getSave(this.playerId);
@@ -45,8 +50,8 @@ export class SaveManager {
       return state;
     } catch (err) {
       console.warn('[SaveManager] backend load failed, falling back to local mirror:', err.message);
-      const mirrored = this._readMirror();
-      if (mirrored) this.gameState.replaceState(mirrored);
+      const mirrored = this._readMirror() || DEFAULT_PLAYER_STATE;
+      this.gameState.replaceState(mirrored);
       return mirrored;
     }
   }

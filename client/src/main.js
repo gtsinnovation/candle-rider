@@ -22,48 +22,78 @@ const PATH_SCENES = {
 async function boot() {
   const container = document.getElementById('app');
 
-  const gameState = new GameState();
-  const saveManager = new SaveManager(gameState);
-  await saveManager.load(); // populates gameState from backend/local mirror
+  try {
+    const gameState = new GameState();
+    const saveManager = new SaveManager(gameState);
+    await saveManager.load(); // populates gameState from backend/local mirror; now has a 5s timeout, can no longer hang forever
 
-  mountHUD(container, gameState);
-  mountInstallPrompt(container);
+    mountHUD(container, gameState);
+    mountInstallPrompt(container);
 
-  // Logs every voluntary cash-out to the backend for the leaderboard.
-  // Losses (rug/liquidation/burnout) aren't logged as run results — they
-  // still update permanent state via GameState.loseRun (bag resets to 0),
-  // which the debounced save picks up regardless.
-  eventBus.on('run:cashout', (result) => {
-    saveManager.reportRunResult(result);
-  });
-
-  eventBus.on('player:levelUp', ({ level }) => {
-    console.log(`[main] Level up! Now level ${level}.`);
-  });
-
-  let teardownScene = null;
-
-  function showHub() {
-    teardownScene?.();
-    teardownScene = mountWarRoom(container, gameState, (pathId) => {
-      const mountScene = PATH_SCENES[pathId];
-      if (!mountScene) {
-        console.warn(`[main] No scene ported yet for path "${pathId}" -- staying in hub.`);
-        gameState.loseRun('scene-not-implemented'); // undo the startRun() the card click triggered
-        return;
-      }
-      teardownScene?.();
-      teardownScene = mountScene(container, gameState, showHub);
+    // Logs every voluntary cash-out to the backend for the leaderboard.
+    // Losses (rug/liquidation/burnout) aren't logged as run results — they
+    // still update permanent state via GameState.loseRun (bag resets to 0),
+    // which the debounced save picks up regardless.
+    eventBus.on('run:cashout', (result) => {
+      saveManager.reportRunResult(result);
     });
+
+    eventBus.on('player:levelUp', ({ level }) => {
+      console.log(`[main] Level up! Now level ${level}.`);
+    });
+
+    let teardownScene = null;
+
+    function showHub() {
+      teardownScene?.();
+      teardownScene = mountWarRoom(container, gameState, (pathId) => {
+        const mountScene = PATH_SCENES[pathId];
+        if (!mountScene) {
+          console.warn(`[main] No scene ported yet for path "${pathId}" -- staying in hub.`);
+          gameState.loseRun('scene-not-implemented'); // undo the startRun() the card click triggered
+          return;
+        }
+        teardownScene?.();
+        teardownScene = mountScene(container, gameState, showHub);
+      });
+    }
+
+    showHub();
+
+    // Save on tab close so the last few seconds of state aren't lost to the
+    // debounce window.
+    window.addEventListener('beforeunload', () => {
+      saveManager.saveNow();
+    });
+  } catch (err) {
+    // Never leave a silent blank screen — this is what let the mobile
+    // black-screen bug go undiagnosed. Any startup failure now shows a
+    // visible message with the actual error, plus a retry button.
+    console.error('[main] boot failed:', err);
+    showBootError(container, err);
   }
+}
 
-  showHub();
-
-  // Save on tab close so the last few seconds of state aren't lost to the
-  // debounce window.
-  window.addEventListener('beforeunload', () => {
-    saveManager.saveNow();
-  });
+function showBootError(container, err) {
+  container.innerHTML = `
+    <div style="
+      position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      flex-direction:column; background:#050510; color:#eef0ff; text-align:center;
+      font-family: system-ui, sans-serif; padding:24px; box-sizing:border-box;
+    ">
+      <div style="font-size:20px; font-weight:700; color:#ff6688; margin-bottom:8px;">Couldn't start Candle Rider</div>
+      <div style="font-size:12px; color:#9a9ac0; max-width:400px; margin-bottom:6px;">
+        ${err?.message ? String(err.message).slice(0, 200) : 'Unknown error during startup.'}
+      </div>
+      <div style="font-size:11px; color:#6f6f95; max-width:400px; margin-bottom:18px;">
+        This is most likely a network issue reaching the game server. Check your connection and try again.
+      </div>
+      <button onclick="location.reload()" style="
+        background:#7dffcf; color:#05100c; border:none; padding:10px 24px;
+        border-radius:7px; font-size:13px; font-weight:700; cursor:pointer;
+      ">RETRY</button>
+    </div>
+  `;
 }
 
 boot();
