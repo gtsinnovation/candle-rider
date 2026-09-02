@@ -14,10 +14,28 @@ const PLAYER_ID_KEY = 'candlerider:playerId';
 const STATE_MIRROR_KEY = 'candlerider:stateMirror';
 const SAVE_DEBOUNCE_MS = 4000;
 
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // crypto.randomUUID only exists in "secure contexts" (HTTPS, or
+  // localhost specifically) — a LAN IP over plain HTTP (e.g. phone testing
+  // against a dev server) doesn't qualify, so the browser removes the
+  // function entirely rather than throwing. This fallback produces a
+  // valid-format v4 UUID via Math.random() instead. It doesn't need to be
+  // cryptographically unpredictable — it's just an anonymous local
+  // save-slot identifier, not a security token.
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 function getOrCreatePlayerId() {
   let id = localStorage.getItem(PLAYER_ID_KEY);
   if (!id) {
-    id = crypto.randomUUID();
+    id = generateUUID();
     localStorage.setItem(PLAYER_ID_KEY, id);
   }
   return id;
