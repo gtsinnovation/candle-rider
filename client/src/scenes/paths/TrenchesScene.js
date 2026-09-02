@@ -26,9 +26,11 @@ const GRAVITY = -20;
 // the original-and-then-some pace back. "Selectable by player" per design,
 // not tied to actual player level/mastery — a run-start choice, not a gate.
 const DIFFICULTY_PRESETS = {
-  beginner: { label: 'Beginner', base: 4.5, ramp: 0.06, cap: 3.5 },
-  middle:   { label: 'Middle',   base: 9,   ramp: 0.12, cap: 7 },
-  master:   { label: 'Master',   base: 13.5, ramp: 0.18, cap: 10.5 },
+  // All three tiers dropped an additional 10% (on top of Beginner's
+  // original 50%-of-baseline) after playtesting felt too fast overall.
+  beginner: { label: 'Beginner', base: 4.05, ramp: 0.054, cap: 3.15 },
+  middle:   { label: 'Middle',   base: 8.1,  ramp: 0.108, cap: 6.3 },
+  master:   { label: 'Master',   base: 12.15, ramp: 0.162, cap: 9.45 },
 };
 
 const DIFFICULTY_STORAGE_KEY = 'candlerider:trenchesDifficulty';
@@ -170,9 +172,35 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   rimLight.position.set(0, 3, 2);
   scene.add(rimLight);
 
-  const grid = new THREE.GridHelper(400, 80, 0x3a2a6a, 0x1a1a35);
-  grid.position.y = -1.2;
-  scene.add(grid);
+  // Scrolling ground plane — a canvas-drawn grid texture on a flat plane,
+  // with the texture's UV offset animated each frame in sync with `speed`.
+  // A static GridHelper (the previous approach) gave no visual sense of
+  // forward travel, so the fast-moving candles read as disorienting
+  // vertical motion with nothing else to anchor against. Scrolling the
+  // floor texture toward the player at the same rate as the candles fixes
+  // that — the ground now reads as a smooth horizontal plane moving
+  // toward you, matching the candle motion instead of fighting it.
+  const gridCanvas = document.createElement('canvas');
+  gridCanvas.width = 128;
+  gridCanvas.height = 128;
+  const gctx = gridCanvas.getContext('2d');
+  gctx.fillStyle = '#0a0a18';
+  gctx.fillRect(0, 0, 128, 128);
+  gctx.strokeStyle = '#3a2a6a';
+  gctx.lineWidth = 2;
+  gctx.strokeRect(0, 0, 128, 128);
+
+  const groundTexture = new THREE.CanvasTexture(gridCanvas);
+  groundTexture.wrapS = THREE.RepeatWrapping;
+  groundTexture.wrapT = THREE.RepeatWrapping;
+  const GROUND_CELL_SIZE = 5; // world units per texture repeat, matches old GridHelper's cell size
+  groundTexture.repeat.set(400 / GROUND_CELL_SIZE, 400 / GROUND_CELL_SIZE);
+
+  const groundMat = new THREE.MeshBasicMaterial({ map: groundTexture, transparent: true, opacity: 0.6 });
+  const groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), groundMat);
+  groundMesh.rotation.x = -Math.PI / 2;
+  groundMesh.position.y = -1.2;
+  scene.add(groundMesh);
 
   LANES.forEach((x) => {
     const geo = new THREE.PlaneGeometry(0.05, 400);
@@ -304,6 +332,12 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     elapsed += dt;
     speed = difficulty.base + Math.min(elapsed * difficulty.ramp, difficulty.cap);
 
+    // Scroll the ground texture toward the player in lockstep with the
+    // candle speed — the plane's V axis runs along world Z after the -90°
+    // rotation, so offsetting texture.offset.y creates the "floor sliding
+    // toward you" effect at the exact same rate everything else moves.
+    groundTexture.offset.y -= (speed * dt) / GROUND_CELL_SIZE;
+
     const targetX = LANES[laneIndex];
     player.position.x += (targetX - player.position.x) * Math.min(1, dt * 12);
     updateLaneDots();
@@ -407,6 +441,9 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     window.removeEventListener('keydown', keydown);
     window.removeEventListener('keyup', keyup);
     window.removeEventListener('resize', resize);
+    groundTexture.dispose();
+    groundMat.dispose();
+    groundMesh.geometry.dispose();
     renderer.dispose();
     root.remove();
   }
