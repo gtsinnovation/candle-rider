@@ -39,7 +39,7 @@ export function mountWarRoom(container, gameState, onSelectPath) {
   el.style.cssText = `
     position: absolute; inset: 0; display: flex; gap: 12px;
     align-items: center; justify-content: center; flex-wrap: wrap;
-    padding: 40px 300px 40px 40px; box-sizing: border-box;
+    padding: 40px 40px 40px 300px; box-sizing: border-box;
     font-family: system-ui, sans-serif;
   `;
   container.appendChild(el);
