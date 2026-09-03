@@ -19,7 +19,12 @@ export class EventBus {
   }
 
   emit(event, payload) {
-    this.listeners.get(event)?.forEach((handler) => handler(payload));
+    // Iterate over a snapshot so a handler that unsubscribes itself (or
+    // another) mid-emit can't skip a sibling handler or throw during Set
+    // mutation.
+    const handlers = this.listeners.get(event);
+    if (!handlers) return;
+    for (const handler of [...handlers]) handler(payload);
   }
 }
 

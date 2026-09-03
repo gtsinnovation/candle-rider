@@ -1,7 +1,7 @@
 # Candle Rider — Technical Features
 
 A running inventory of implemented systems, kept up to date as the project grows.
-Last updated: alongside the Trenches core-loop responsiveness pass (jump buffering, snappier lanes, freeze fix, run-start timing).
+Last updated: alongside the full event-bus wiring pass (all game events now drive real-time HUD feedback).
 
 ---
 
@@ -14,7 +14,7 @@ Last updated: alongside the Trenches core-loop responsiveness pass (jump bufferi
 
 ## Core Client Systems
 
-- **EventBus** — pub/sub decoupling `GameState` from UI/scenes; nobody holds direct references to anybody else
+- **EventBus** — pub/sub decoupling `GameState` from UI/scenes; nobody holds direct references to anybody else. `emit` iterates a snapshot of handlers so a handler that unsubscribes mid-emit can't break iteration. Every emitted event (`state:changed`, `run:started`, `run:bagChanged`, `run:lost`, `run:cashout`, `player:levelUp`) has at least one subscriber — no orphaned events
 - **GameState** — run lifecycle (`startRun` / `addBag` / `reportHealth` / `reportEnergy` / `cashOut` / `loseRun`), XP/leveling curve, per-path mastery tracking. Health and Energy reset to full at the start of every run (run-scoped resources, not persistent damage)
 - **SaveManager** — backend-primary persistence with a localStorage mirror fallback; debounced saves (4s) plus an immediate save on cash-out; anonymous UUID player identity with a manual fallback generator for non-secure contexts (e.g. LAN/HTTP testing, where `crypto.randomUUID` is unavailable); falls back to `DEFAULT_PLAYER_STATE` when both the backend and the local mirror are unavailable (first-ever visit + offline)
 - **API client** — fetch wrapper with a hard 5-second timeout on every request, so a hung network call can never silently block app startup
@@ -38,6 +38,13 @@ Last updated: alongside the Trenches core-loop responsiveness pass (jump bufferi
 - Global stats panel: Level, Bag, PNL, Health, Energy, Conviction, Reputation, Conviction Shards
 - Responsive: narrower/more compact on mobile viewports
 - Built once on mount; only the value text nodes update on `state:changed` (which fires every frame during a run) — no per-frame `innerHTML` rebuild, so the HUD stays cheap even while Bag/Energy tick continuously
+- **Event-driven real-time feedback** — subscribes to every game event, not just `state:changed`:
+  - `run:started` → cyan panel flash
+  - `run:bagChanged` → Bag line tints green while gaining, red on a loss (stays green during a green-candle streak, flashes red on a rug)
+  - `run:lost` → red panel flash + "RUN OVER" banner
+  - `run:cashout` → green panel flash + "PNL BANKED" banner with the amount
+  - `player:levelUp` → gold panel flash + "LEVEL UP!" banner
+  - All subscriptions are collected and torn down on HUD unmount
 
 ## Trenches Path (Path 1 — Memecoin & Trenches Degen)
 
