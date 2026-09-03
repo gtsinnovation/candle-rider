@@ -1,7 +1,7 @@
 # Candle Rider — Technical Features
 
 A running inventory of implemented systems, kept up to date as the project grows.
-Last updated: alongside the Trenches combat-impact feedback and snappier movement pass.
+Last updated: alongside the admin demo/autopilot mode addition.
 
 ---
 
@@ -124,6 +124,13 @@ Last updated: alongside the Trenches combat-impact feedback and snappier movemen
 - Vite dev server LAN-accessible (`host: true`) for real-device testing over the local network
 
 ---
+
+## Demo / Autopilot mode (admin-only)
+
+- **Admin dashboard** at the hidden `#admin` route, passphrase-gated (`degen-admin`, change in `AdminDashboard.js`) so regular players can't reach it. Hosts the Demo Play toggle.
+- **Demo Play toggle** — when on, the Trenches path runs an autopilot hands-free: it apes into a coin, rides each candle until near-despawn then jumps to the next arriving candle (picking the safest lane each frame), cashes out at a target bag ($200) or time limit (42s), then auto-retries — looping for hands-off teaser/cast footage pre-launch.
+- The flag persists in `localStorage` (`cd_demo_mode`) so it survives reloads; the live in-memory value updates immediately on toggle, no reload needed.
+- Auth is client-side only (passphrase + sessionStorage) — it keeps the panel off the normal player path, not real security.
 
 ## Known limitations / honest caveats
 

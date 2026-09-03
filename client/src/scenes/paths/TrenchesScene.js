@@ -18,6 +18,7 @@
 import * as THREE from 'three';
 import { eventBus } from '../../core/EventBus.js';
 import { TRENCHES_COINS, getLastCoinId, setLastCoinId, getCoinById } from './trenchesCoins.js';
+import { isDemoMode } from '../../core/demoMode.js';
 
 // World scale: candle blocks, lane spacing, and everything spatial except
 // the hero were reduced 25% (0.75x) — the hero's own size (HERO_HEIGHT
@@ -864,6 +865,112 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     showOverlay(title, reason, '#ff5577');
   }
 
+  // ---------- Demo / autopilot mode (admin-controlled) ----------
+  // When the admin dashboard flips demo mode on, an autopilot drives the
+  // whole run hands-free: apes into a coin, picks the safest lane each
+  // frame (nearest green candle not about to flip), jumps to bridge gaps /
+  // escape rugs, cashes out at a target bag (or time limit), then
+  // auto-retries — looping for teaser/cast footage. Driven from animate()
+  // so it runs in every phase (coin room, play, ended), not just update().
+  const DEMO_BAG_TARGET = 200;
+  const DEMO_MAX_RUN_SEC = 42;
+  let demoApeInDelay = 0;
+  let demoEndedDelay = 0;
+  let demoRetryQueued = false;
+
+  // Score each lane by its best candle near the landing zone: green candles
+  // close to z=0 that aren't about to flip rank highest.
+  // Pick the safest lane to be in. Only candles that are arriving or at
+  // the landing zone (z <= 1.2) count — a candle past that is leaving and
+  // will despawn before it can be ridden. `avoidLane` penalizes the lane
+  // we're trying to leave so the autopilot switches away from a bad candle
+  // rather than jumping straight back onto it.
+  // Pick the safest lane to be in. Only candles at or before the landing
+  // zone (z <= 1.2) count; a candle past that is leaving and will despawn
+  // before it can be ridden. Fresh candles still near z=0 score highest —
+  // the autopilot slides sideways onto them instead of jumping into gaps.
+  // `avoidLane` penalizes the lane we're leaving so we switch away from a
+  // bad candle rather than re-selecting it.
+  // Pick the lane with the best candle to escape to. Only candles that are
+  // arriving or at center (z <= 0.5) count — a candle past that is leaving
+  // and will despawn before it can be ridden. The filter reaches back to
+  // z=-5 so it includes candles that arrive at the landing zone during a
+  // jump's ~0.83s airtime (~speed*0.83 ≈ 3 units of travel). `avoidLane`
+  // lightly penalizes the lane we're leaving so we prefer a fresh lane.
+  function bestEscapeLane(now, avoidLane) {
+    const laneBest = [-Infinity, -Infinity, -Infinity];
+    for (const c of candles) {
+      const z = c.mesh.position.z;
+      if (z < -5 || z > 0.5) continue;
+      const flippingSoon = c.color === 'green' && (c.flipAt - now) < 1000;
+      const green = c.color === 'green' && !flippingSoon;
+      let score = (green ? 100 : (c.color === 'green' ? 45 : 8)) - Math.abs(z) * 5;
+      if (c.lane === avoidLane) score -= 25;
+      if (score > laneBest[c.lane]) laneBest[c.lane] = score;
+    }
+    let targetLane = laneIndex, top = -Infinity;
+    for (let l = 0; l < 3; l++) {
+      if (laneBest[l] > top) { top = laneBest[l]; targetLane = l; }
+    }
+    return targetLane;
+  }
+
+  function demoAutopilot() {
+    const now = performance.now();
+    if (onCandle) {
+      const cz = onCandle.mesh.position.z;
+      // Ride the current candle until it's near despawn, then jump to the
+      // next arriving candle. One jump per candle keeps the autopilot
+      // stable — jumping for red/flips causes chaos, and the flip damage is
+      // already done by the time we'd react anyway.
+      if (cz > DESPAWN_Z * 0.25 && !jumping) {
+        const target = bestEscapeLane(now, laneIndex);
+        if (target !== laneIndex) laneIndex = target;
+        tryJump();
+      }
+    } else {
+      // Airborne — steer toward the best landing lane, and step-jump to
+      // extend airtime only when there's no candle at all under us (landing
+      // on red is survivable, so don't waste a step-jump then).
+      const target = bestEscapeLane(now, -1);
+      if (target !== laneIndex) laneIndex = target;
+      if (velY < 0) {
+        const hasLanding = candles.some((c) => c.lane === laneIndex && Math.abs(c.mesh.position.z) < 2.0);
+        if (!hasLanding && jumpChainCount < MAX_JUMP_TAPS) tryJump();
+      }
+    }
+  }
+
+  function demoTick(dt) {
+    if (!isDemoMode()) return;
+    // Coin room → ape in after a beat so the door animation reads
+    if (roomActive && !started) {
+      demoApeInDelay += dt;
+      if (demoApeInDelay > 1.1) apeIntoCoin(TRENCHES_COINS[focusedCoinIndex]);
+      return;
+    }
+    // Playing → autopilot + cash out at target/time
+    if (started && !ended && !paused) {
+      demoAutopilot();
+      const bag = gameState.currentRun ? gameState.currentRun.bag : 0;
+      if (bag >= DEMO_BAG_TARGET || elapsed > DEMO_MAX_RUN_SEC) cashOut();
+      return;
+    }
+    // Ended → auto-retry after a pause so the result overlay is visible
+    if (ended && !demoRetryQueued) {
+      demoEndedDelay += dt;
+      if (demoEndedDelay > 2.2) {
+        demoRetryQueued = true;
+        // Defer to after this frame so teardown (triggered by the retry
+        // click) doesn't run mid-render.
+        setTimeout(() => {
+          const btn = overlay.querySelector('#tr-retry-btn');
+          if (btn && isDemoMode()) btn.click();
+        }, 0);
+      }
+    }
+  }
+
   overlay.querySelector('#tr-retry-btn').addEventListener('click', () => {
     teardown();
     mountTrenchesScene(container, gameState, onRunEnd);
@@ -1110,6 +1217,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     });
 
     if (started && !ended && !paused) update(dt);
+    demoTick(dt); // admin autopilot — no-op unless demo mode is on
     renderer.render(scene, camera);
   }
   animate();
