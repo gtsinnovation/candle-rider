@@ -10,6 +10,7 @@ import { mountHUD } from './ui/HUD.js';
 import { mountInstallPrompt } from './ui/InstallPrompt.js';
 import { mountWarRoom } from './scenes/WarRoomScene.js';
 import { mountTrenchesScene } from './scenes/paths/TrenchesScene.js';
+import { mountAdminDashboard } from './ui/AdminDashboard.js';
 import { eventBus } from './core/EventBus.js';
 
 // Fallback for mobile browsers that don't support the CSS `dvh` unit yet —
@@ -62,7 +63,6 @@ async function boot() {
         const mountScene = PATH_SCENES[pathId];
         if (!mountScene) {
           console.warn(`[main] No scene ported yet for path "${pathId}" -- staying in hub.`);
-          gameState.loseRun('scene-not-implemented'); // undo the startRun() the card click triggered
           return;
         }
         teardownScene?.();
@@ -70,7 +70,19 @@ async function boot() {
       });
     }
 
-    showHub();
+    // Hash-based routing: `#admin` mounts the admin dashboard (passphrase
+    // gated), anything else mounts the game hub. The admin dashboard's
+    // "Open Game" button clears the hash, which fires hashchange back here.
+    function showAdmin() {
+      teardownScene?.();
+      teardownScene = mountAdminDashboard(container, () => { location.hash = ''; });
+    }
+    function route() {
+      if (location.hash === '#admin') showAdmin();
+      else showHub();
+    }
+    window.addEventListener('hashchange', route);
+    route();
 
     // Save on tab close so the last few seconds of state aren't lost to the
     // debounce window.
