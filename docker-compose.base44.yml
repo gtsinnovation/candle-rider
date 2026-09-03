@@ -1,0 +1,19 @@
+services:
+  app:
+    image: node:22
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - node_modules:/app/node_modules
+    ports:
+      - "3000:5173"   # Vite dev server (proxies /api to the in-container API on :3001)
+    environment:
+      - PORT=3001
+      - HOST=0.0.0.0
+      - CANDLE_RIDER_DB_PATH=/app/data/candlerider.db
+      - CHOKIDAR_USEPOLLING=true
+    command: sh -c "npm install --no-audit --no-fund && (npm run dev:server & npm run dev:client & wait)"
+    restart: unless-stopped
+
+volumes:
+  node_modules:
