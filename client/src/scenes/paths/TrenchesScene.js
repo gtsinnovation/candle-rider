@@ -220,10 +220,10 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // are actually seen at the moment they matter.
   const controlsToast = document.createElement('div');
   controlsToast.style.cssText = `
-    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    position:absolute; bottom:56px; left:12px; transform:none;
     background:rgba(10,10,24,.85); border:1px solid #3a3a6f; border-radius:12px;
-    padding:16px 22px; z-index:30; font-family:system-ui,sans-serif; text-align:center;
-    color:#eef0ff; opacity:0; transition:opacity .4s; pointer-events:none; max-width:80vw;
+    padding:14px 18px; z-index:30; font-family:system-ui,sans-serif; text-align:left;
+    color:#eef0ff; opacity:0; transition:opacity .4s; pointer-events:none; max-width:60vw;
   `;
   root.appendChild(controlsToast);
   function showControlsToast(durationMs = 3200) {
