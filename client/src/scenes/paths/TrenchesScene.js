@@ -235,6 +235,90 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     showControlsToast._t = setTimeout(() => (controlsToast.style.opacity = '0'), durationMs);
   }
 
+  // ---------- Bag Value HUD chart ----------
+  // Positioned far-left, vertically centered, deliberately away from the
+  // center of the screen so it never obscures the play area. Rolling
+  // 40-tick buffer, sampled on a fixed time interval (not per-frame) so
+  // continuous candle-riding accrual doesn't flood the buffer with 60
+  // near-identical points a second — see note above.
+  const CHART_MAX_POINTS = 40;
+  const CHART_SAMPLE_INTERVAL = 0.35; // seconds between ticks
+  const CHART_W = 130;
+  const CHART_H = 190;
+
+  const chartCanvas = document.createElement('canvas');
+  chartCanvas.width = CHART_W;
+  chartCanvas.height = CHART_H;
+  chartCanvas.style.cssText = `
+    position:absolute; left:14px; top:50%; transform:translateY(-50%);
+    z-index:6; background:rgba(8,8,20,.55); border:1px solid #2a2a4a; border-radius:8px;
+    pointer-events:none;
+  `;
+  root.appendChild(chartCanvas);
+  const chartCtx = chartCanvas.getContext('2d');
+
+  let bagHistory = [0];
+  let chartSampleTimer = 0;
+
+  function formatMcap(value) {
+    const v = Math.round(value);
+    if (Math.abs(v) >= 1000) return `$${(v / 1000).toFixed(1)}K MCAP`;
+    return `$${v} MCAP`;
+  }
+
+  function pushChartSample(value) {
+    bagHistory.push(value);
+    if (bagHistory.length > CHART_MAX_POINTS) bagHistory.shift();
+    drawChart();
+  }
+
+  function drawChart() {
+    const ctx = chartCtx;
+    ctx.clearRect(0, 0, CHART_W, CHART_H);
+
+    const padding = 18;
+    const plotH = CHART_H - padding * 2;
+    const plotW = CHART_W - 10;
+    let min = Math.min(...bagHistory);
+    let max = Math.max(...bagHistory);
+    if (min === max) { min -= 1; max += 1; } // avoid a divide-by-zero flat-line edge case
+
+    const toXY = (i, v) => {
+      const x = 5 + (bagHistory.length === 1 ? 0 : (i / (bagHistory.length - 1)) * plotW);
+      const y = padding + plotH - ((v - min) / (max - min)) * plotH;
+      return [x, y];
+    };
+
+    // Draw each segment colored by direction — green for gains, red for drops.
+    for (let i = 1; i < bagHistory.length; i++) {
+      const [x1, y1] = toXY(i - 1, bagHistory[i - 1]);
+      const [x2, y2] = toXY(i, bagHistory[i]);
+      ctx.strokeStyle = bagHistory[i] >= bagHistory[i - 1] ? '#00ff77' : '#ff3355';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+
+    // Peak label — the highest local maximum currently in the buffer.
+    let peakIdx = 0;
+    for (let i = 1; i < bagHistory.length; i++) {
+      if (bagHistory[i] > bagHistory[peakIdx]) peakIdx = i;
+    }
+    const [px, py] = toXY(peakIdx, bagHistory[peakIdx]);
+    ctx.font = '10px monospace';
+    ctx.fillStyle = '#ffe066';
+    ctx.textAlign = 'center';
+    ctx.fillText(formatMcap(bagHistory[peakIdx]), px, Math.max(12, py - 8));
+    ctx.beginPath();
+    ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffe066';
+    ctx.fill();
+  }
+
+  drawChart(); // initial flat line at $0 before the run properly gets moving
+
   function popCombo(text, color) {
     combo.textContent = text;
     combo.style.color = color || '#ffd166';
@@ -720,6 +804,12 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     }
 
     speed = difficulty.base + Math.min(elapsed * difficulty.ramp, difficulty.cap);
+
+    chartSampleTimer += dt;
+    if (chartSampleTimer >= CHART_SAMPLE_INTERVAL) {
+      chartSampleTimer = 0;
+      pushChartSample(gameState.currentRun ? gameState.currentRun.bag : 0);
+    }
 
     // Scroll the ground texture toward the player in lockstep with the
     // candle speed — the plane's V axis runs along world Z after the -90°
