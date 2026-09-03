@@ -62,7 +62,6 @@ async function boot() {
         const mountScene = PATH_SCENES[pathId];
         if (!mountScene) {
           console.warn(`[main] No scene ported yet for path "${pathId}" -- staying in hub.`);
-          gameState.loseRun('scene-not-implemented'); // undo the startRun() the card click triggered
           return;
         }
         teardownScene?.();

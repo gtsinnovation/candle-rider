@@ -74,8 +74,7 @@ export function mountWarRoom(container, gameState, onSelectPath) {
 
       if (unlocked) {
         card.addEventListener('click', () => {
-          gameState.startRun(path.id);
-          onSelectPath(path.id);
+          onSelectPath(path.id); // the scene starts the run itself at ape-in
         });
       }
 

@@ -33,7 +33,9 @@ const IDLE_WARNING_MS = 9 * 60 * 1000;  // show a warning at 9 minutes of inacti
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // auto-pause at 10 minutes of inactivity
 
 export function mountTrenchesScene(container, gameState, onRunEnd) {
-  gameState.startRun('trenches');
+  // The run starts when the player apes into a coin (apeIntoCoin), not on
+  // card click — so the run clock and resource resets begin at the moment
+  // gameplay actually begins, not while browsing the coin room.
 
   // ---------- DOM scaffold (scene-specific UI only; global HUD covers
   // bag/health/energy/conviction/reputation already) ----------
@@ -548,7 +550,11 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // scene instead of showing as a black rectangle. Sprites always face
   // the camera automatically, which suits an endless-runner viewed from
   // a mostly-fixed chase angle.
-  const heroTexture = new THREE.TextureLoader().load('/assets/heroes/trenches-back-cutout.png');
+  const heroTexture = new THREE.TextureLoader().load(
+    '/assets/heroes/trenches-back-cutout.png',
+    undefined, undefined,
+    (err) => console.error('[trenches] hero texture failed to load:', err?.message || err)
+  );
   const heroMat = new THREE.SpriteMaterial({ map: heroTexture, transparent: true });
   const heroSprite = new THREE.Sprite(heroMat);
   const HERO_HEIGHT = 2.1;
@@ -567,14 +573,21 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   const GREEN = 0x00ff77;
   const RED = 0xff3355;
 
-  function candleMaterial(color) {
-    return new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.55, roughness: 0.4 });
-  }
+  // Shared geometry + two shared materials for ALL candles. Candles spawn
+  // and despawn continuously throughout a run, so per-candle geometry/
+  // material allocations would leak GPU memory for the whole session (the
+  // old code removed the mesh on despawn but never disposed its geometry/
+  // material). Height varies per candle via mesh.scale.y instead of a
+  // per-candle BoxGeometry, so a single shared unit cube suffices.
+  const candleGeo = new THREE.BoxGeometry(1, 1, 1);
+  const greenMat = new THREE.MeshStandardMaterial({ color: GREEN, emissive: GREEN, emissiveIntensity: 0.55, roughness: 0.4 });
+  const redMat = new THREE.MeshStandardMaterial({ color: RED, emissive: RED, emissiveIntensity: 0.55, roughness: 0.4 });
 
   function spawnCandle(z, forcedLane) {
     const lane = forcedLane !== undefined ? forcedLane : Math.floor(Math.random() * 3);
     const height = (0.6 + Math.random() * 1.6) * WORLD_SCALE;
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(CANDLE_W, height, CANDLE_D), candleMaterial(GREEN));
+    const mesh = new THREE.Mesh(candleGeo, greenMat);
+    mesh.scale.set(CANDLE_W, height, CANDLE_D);
     mesh.position.set(LANES[lane], height / 2 - 1.2, z);
     scene.add(mesh);
     const candle = {
@@ -626,6 +639,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
   function apeIntoCoin(coin) {
     if (started) return; // already ape'd in, ignore repeat clicks/enters
+    gameState.startRun('trenches'); // run begins here, not on the card click
     difficulty = coin;
     setLastCoinId(coin.id);
 
@@ -878,8 +892,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
       if (c.color === 'green' && performance.now() > c.flipAt) {
         c.color = 'red';
-        c.mesh.material.color.setHex(RED);
-        c.mesh.material.emissive.setHex(RED);
+        c.mesh.material = redMat; // swap to the shared red material (no per-candle alloc)
         if (onCandle === c) {
           gameState.reportHealth(Math.max(0, gameState.state.health - 14));
           popCombo('RUG FLIP! -14 HP', '#ff5577');
@@ -1028,6 +1041,27 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   }
   animate();
 
+  // ---------- Robustness: auto-pause on tab hidden, recover on context loss
+  function onVisibilityChange() {
+    if (document.hidden && started && !ended && !paused) {
+      pauseGame('Auto-paused — you switched away from the game.');
+    }
+  }
+  document.addEventListener('visibilitychange', onVisibilityChange);
+
+  function onContextLost(e) {
+    e.preventDefault();
+    cancelAnimationFrame(animId);
+    if (started && !ended) {
+      ended = true;
+      overlay.querySelector('#tr-overlay-title').textContent = 'GRAPHICS CONTEXT LOST';
+      overlay.querySelector('#tr-overlay-title').style.color = '#ff6688';
+      overlay.querySelector('#tr-overlay-reason').textContent = 'The graphics context was lost (common on mobile under memory pressure). Reload the page to resume.';
+      overlay.style.display = 'flex';
+    }
+  }
+  renderer.domElement.addEventListener('webglcontextlost', onContextLost);
+
   // ---------- TEARDOWN ----------
   function teardown() {
     cancelAnimationFrame(animId);
@@ -1036,6 +1070,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     window.removeEventListener('resize', resize);
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerUp);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
     renderer.domElement.removeEventListener('pointerdown', onPointerDown);
     renderer.domElement.removeEventListener('wheel', onWheel);
     renderer.domElement.removeEventListener('click', onCoinClick);
@@ -1053,6 +1089,9 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     groundTexture.dispose();
     groundMat.dispose();
     groundMesh.geometry.dispose();
+    candleGeo.dispose();
+    greenMat.dispose();
+    redMat.dispose();
     heroTexture.dispose();
     heroMat.dispose();
     renderer.dispose();
