@@ -94,7 +94,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     background:rgba(0,0,0,.55); border:1px solid #333; border-radius:6px;
     padding:6px 10px; font-family:monospace; font-size:11px; color:#9f9;
     line-height:1.5; pointer-events:none;
-    ${window.innerWidth < 480 ? 'display:none;' : ''}
+    display:none;
   `;
   root.appendChild(debugBox);
 
@@ -153,9 +153,10 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
   const coinLabel = document.createElement('div');
   coinLabel.style.cssText = `
-    position:absolute; top:40%; left:50%; transform:translate(-50%,-50%);
+    position:absolute; top:18px; left:50%; transform:translateX(-50%);
     font-size:16px; font-weight:700; color:#eef0ff; text-align:center; z-index:6;
     font-family: system-ui, sans-serif; pointer-events:none; text-shadow:0 0 10px rgba(0,0,0,.8);
+    background:rgba(8,8,20,.55); padding:6px 16px; border-radius:8px; border:1px solid #2a2a4a;
   `;
   root.appendChild(coinLabel);
 
@@ -189,7 +190,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // the game to be usable there. Desktop keyboard shortcuts still work too.
   const touchButtonRow = document.createElement('div');
   touchButtonRow.style.cssText = `
-    position:absolute; top:110px; right:22px; z-index:6; display:flex; gap:8px;
+    position:absolute; top:110px; right:22px; z-index:6; display:none; gap:8px;
   `;
   touchButtonRow.innerHTML = `
     <button id="tr-pause-btn" style="background:rgba(20,20,40,.75);color:#eef0ff;border:1px solid #3a3a6f;border-radius:7px;padding:8px 12px;font-size:16px;cursor:pointer;font-family:system-ui,sans-serif;">⏸</button>
@@ -252,7 +253,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   chartCanvas.style.cssText = `
     position:absolute; left:14px; top:50%; transform:translateY(-50%);
     z-index:6; background:rgba(8,8,20,.55); border:1px solid #2a2a4a; border-radius:8px;
-    pointer-events:none;
+    pointer-events:none; display:none;
   `;
   root.appendChild(chartCanvas);
   const chartCtx = chartCanvas.getContext('2d');
@@ -457,15 +458,27 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     return new THREE.CanvasTexture(c);
   }
 
+  // Coins arranged on a curved arc around orbitTarget, all equidistant —
+  // scales to any screen width naturally (unlike a straight row, which
+  // either runs off-screen or needs constant re-tuning per viewport).
+  const ARC_RADIUS = 6.2;
+  const ARC_SPAN = Math.PI * 0.75; // ~135° total spread
+
   const coinMeshes = TRENCHES_COINS.map((coin, i) => {
-    const x = (i - (TRENCHES_COINS.length - 1) / 2) * 1.9;
+    const t = TRENCHES_COINS.length === 1 ? 0 : i / (TRENCHES_COINS.length - 1);
+    const angle = -ARC_SPAN / 2 + t * ARC_SPAN;
+    const x = orbitTarget.x + Math.sin(angle) * ARC_RADIUS;
+    const z = orbitTarget.z - Math.cos(angle) * ARC_RADIUS;
+
     const group = new THREE.Group();
-    group.position.set(x, 1.1, -3);
+    group.position.set(x, 1.1, z);
+    group.lookAt(orbitTarget.x, group.position.y, orbitTarget.z); // each coin faces the center of the arc, not just whichever way it happened to spawn
 
     const disc = new THREE.Mesh(
       new THREE.CylinderGeometry(0.55, 0.55, 0.12, 24),
       new THREE.MeshStandardMaterial({ color: coin.color, emissive: coin.color, emissiveIntensity: 0.7, roughness: 0.35, metalness: 0.4 })
     );
+    disc.rotation.x = Math.PI / 2; // stand the coin upright, flat face toward the viewer, instead of lying flat like a hockey puck
     group.add(disc);
 
     const labelMat = new THREE.SpriteMaterial({ map: makeCoinLabelTexture(coin), transparent: true });
@@ -514,13 +527,16 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   }
   renderer.domElement.addEventListener('click', onCoinClick);
 
+  const laneGuides = [];
   LANES.forEach((x) => {
     const geo = new THREE.PlaneGeometry(0.05, 400);
     const mat = new THREE.MeshBasicMaterial({ color: 0x2c2c55, transparent: true, opacity: 0.5 });
     const line = new THREE.Mesh(geo, mat);
     line.rotation.x = -Math.PI / 2;
     line.position.set(x, -1.18, -150);
+    line.visible = false; // hidden during the coin room — the track shouldn't compete visually with coin selection
     scene.add(line);
+    laneGuides.push(line);
   });
 
   let laneIndex = 1;
@@ -585,6 +601,10 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     spawnCandle(cursorZ);
     cursorZ -= (3.4 + Math.random() * 1.4) * WORLD_SCALE;
   }
+  // Hide the track candles during the coin room — only the platform the
+  // hero is already standing on (startCandle) stays visible, so the scene
+  // reads as "you and a coin vault," not a half-visible obstacle course.
+  candles.forEach((c) => { if (c !== startCandle) c.mesh.visible = false; });
 
   // ---------- STATE ----------
   const keys = {};
@@ -618,6 +638,15 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     coinMeshes.forEach((c) => { c.group.visible = false; });
     roomHint.style.display = 'none';
     coinLabel.style.display = 'none';
+
+    // Reveal the track (previously hidden so it didn't compete visually
+    // with coin selection) and the gameplay-only UI (pause/cash-out/chart
+    // make no sense before a run has actually begun).
+    candles.forEach((c) => { c.mesh.visible = true; });
+    laneGuides.forEach((line) => { line.visible = true; });
+    touchButtonRow.style.display = 'flex';
+    chartCanvas.style.display = 'block';
+    if (window.innerWidth >= 480) debugBox.style.display = 'block';
 
     // Defense-in-depth: force the player back to the guaranteed starting
     // lane/position regardless of any other state.
