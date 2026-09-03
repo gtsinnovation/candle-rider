@@ -62,7 +62,7 @@ export function mountWarRoom(container, gameState, onSelectPath) {
       `;
       card.innerHTML = `
         <img src="${heroArtUrl(path.id)}" alt="${path.name}"
-          style="width:100%; height:200px; object-fit:cover; ${unlocked ? '' : 'filter:grayscale(1);'}" />
+          style="width:100%; height:auto; display:block; ${unlocked ? '' : 'filter:grayscale(1);'}" />
         <div style="padding:12px 14px;">
           <div style="font-size:13px;font-weight:700;margin-bottom:2px;">${path.name}</div>
           <div style="font-size:10px;color:#9a9ac0;margin-bottom:6px;">${path.theme}</div>
