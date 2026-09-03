@@ -17,6 +17,11 @@ function injectResponsiveStyles() {
   stylesInjected = true;
   const style = document.createElement('style');
   style.textContent = `
+    @keyframes heroIdle {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+    }
+    .hero-card-art { animation: heroIdle 3s ease-in-out infinite; }
     @media (max-width: 768px) {
       #war-room {
         flex-wrap: nowrap !important;
@@ -61,7 +66,7 @@ export function mountWarRoom(container, gameState, onSelectPath) {
         cursor: ${unlocked ? 'pointer' : 'not-allowed'};
       `;
       card.innerHTML = `
-        <img src="${heroArtUrl(path.id)}" alt="${path.name}"
+        <img src="${heroArtUrl(path.id)}" alt="${path.name}" class="hero-card-art"
           style="width:100%; height:auto; display:block; ${unlocked ? '' : 'filter:grayscale(1);'}" />
         <div style="padding:12px 14px;">
           <div style="font-size:13px;font-weight:700;margin-bottom:2px;">${path.name}</div>

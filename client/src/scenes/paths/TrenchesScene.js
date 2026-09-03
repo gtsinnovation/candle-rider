@@ -785,7 +785,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     // below), so it's per-jump, not a global resource.
     if (jumpChainCount < MAX_JUMP_TAPS) {
       jumpChainCount++;
-      velY = JUMP_BOOST_VEL;
+      velY = Math.max(velY + JUMP_BOOST_VEL, JUMP_BOOST_VEL);
     } else {
       // At the step-up cap — buffer the press so that if the player lands
       // within the buffer window, a fresh launch fires immediately on
@@ -1021,7 +1021,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     groundTexture.offset.y -= (speed * dt) / GROUND_CELL_SIZE;
 
     const targetX = LANES[laneIndex];
-    player.position.x += (targetX - player.position.x) * Math.min(1, dt * 20); // snappier lane transitions (~75ms) so dodging between lanes feels immediate
+    player.position.x += (targetX - player.position.x) * Math.min(1, dt * 15); // smoother lane transitions (~110ms) — eased slide between lanes
     updateLaneDots();
 
     // Tick down the jump buffer; consumed on landing below.
@@ -1036,7 +1036,11 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       c.mesh.position.z += speed * dt;
 
       if (performance.now() > c.flipAt) {
-        if (c.color === 'green') {
+        if (onCandle === c) {
+          // The player is riding this candle — don't flip its color out from
+          // under them. Reschedule the trend change for after they leave.
+          c.flipAt = performance.now() + 1800 + Math.random() * 2600;
+        } else if (c.color === 'green') {
           c.color = 'red';
           c.mesh.material = redMat; // swap to the shared red material (no per-candle alloc)
           if (onCandle === c) {
