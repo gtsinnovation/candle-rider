@@ -228,8 +228,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   root.appendChild(controlsToast);
   function showControlsToast(durationMs = 3200) {
     controlsToast.innerHTML = isTouchDevice
-      ? '<div style="font-size:20px;margin-bottom:6px;">👆 SWIPE to change lanes<br/>👆 TAP to jump</div><div style="font-size:11px;color:#9a9ac0;">Use the ⏸ and CASH OUT buttons up top</div>'
-      : '<div style="font-size:20px;margin-bottom:6px;">A/D or ←/→ to move · SPACE to jump</div><div style="font-size:11px;color:#9a9ac0;">ESC to cash out · P to pause</div>';
+      ? '<div style="font-size:20px;margin-bottom:6px;">👆 SWIPE to change lanes<br/>👆 TAP to jump — tap again mid-air to climb higher</div><div style="font-size:11px;color:#9a9ac0;">Use the ⏸ and CASH OUT buttons up top</div>'
+      : '<div style="font-size:20px;margin-bottom:6px;">A/D or ←/→ to move · SPACE to jump — tap again mid-air to climb higher</div><div style="font-size:11px;color:#9a9ac0;">ESC to cash out · P to pause</div>';
     controlsToast.style.opacity = '1';
     clearTimeout(showControlsToast._t);
     showControlsToast._t = setTimeout(() => (controlsToast.style.opacity = '0'), durationMs);
@@ -590,6 +590,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   const keys = {};
   let velY = 0;
   let jumping = true;
+  let jumpChainCount = 0; // resets to 0 on every landing — tracks taps within the current airborne phase
   let onCandle = null;
   let speed = 6; // base scroll speed — lowered from 9 for a gentler start
   let elapsed = 0;
@@ -629,6 +630,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     player.position.y = topY;
     velY = 0;
     jumping = false;
+    jumpChainCount = 0;
     onCandle = startCandle;
 
     // Refresh every currently-spawned candle's flip timer relative to NOW —
@@ -692,10 +694,26 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   window.addEventListener('keydown', keydown);
   window.addEventListener('keyup', keyup);
 
+  const MAX_JUMP_TAPS = 3;   // 1 launch + up to 2 step-up boosts per airborne phase
+  const JUMP_LAUNCH_VEL = 7.5; // unchanged from the original tuned jump
+  const JUMP_BOOST_VEL = 5.5;  // smaller "step up" kick for each extra tap while airborne
+
   function tryJump() {
-    if (jumping) return;
-    jumping = true;
-    velY = 7.5; // retuned alongside gravity — still clears the full candle height range, but with less airtime overshoot past the landing window
+    if (!jumping) {
+      // fresh jump from solid ground
+      jumping = true;
+      jumpChainCount = 1;
+      velY = JUMP_LAUNCH_VEL;
+      return;
+    }
+    // Already airborne — each additional tap gives one more incremental
+    // step up, capped so repeated tapping can't just fly over everything.
+    // Resets to 0 the moment the player actually lands (see landing checks
+    // below), so it's per-jump, not a global resource.
+    if (jumpChainCount < MAX_JUMP_TAPS) {
+      jumpChainCount++;
+      velY = JUMP_BOOST_VEL;
+    }
   }
 
   // Left-click also jumps during gameplay — mirrors Space exactly via the
@@ -873,6 +891,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
         if (jumping) landSquashTimer = 0.18; // was airborne, now landing — fire the squash
         velY = 0;
         jumping = false;
+        jumpChainCount = 0;
         onCandle = c;
 
         if (!c.scored) {
