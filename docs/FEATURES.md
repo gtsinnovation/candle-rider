@@ -1,7 +1,7 @@
 # Candle Rider — Technical Features
 
 A running inventory of implemented systems, kept up to date as the project grows.
-Last updated: alongside the full event-bus wiring pass (all game events now drive real-time HUD feedback).
+Last updated: alongside the Trenches combat-impact feedback and snappier movement pass.
 
 ---
 
@@ -61,10 +61,17 @@ Last updated: alongside the full event-bus wiring pass (all game events now driv
 
 ### Responsiveness & feel
 - **Jump buffering** — a jump press made within 120ms of touchdown is buffered and re-fired as a fresh launch the instant the player lands, instead of being eaten. Removes the "I pressed jump a hair too early and nothing happened" frustration that makes runners feel unresponsive. Only engages once the step-up cap is reached, so it never conflicts with the mid-air boost mechanic.
-- **Snappier lane transitions** — the hero lerps to the target lane at `dt * 16` (~100ms to settle), tightened from `dt * 12` so dodging between candle lanes feels immediate rather than floaty. The banking-lean animation lags slightly behind the snap, which reads as natural weight shift.
+- **Snappier lane transitions** — the hero lerps to the target lane at `dt * 20` (~75ms to settle), so dodging between candle lanes feels immediate. The banking-lean animation (`dt * 12`) catches up quickly, reading as natural weight shift rather than lag.
+- **Tighter camera follow** — the chase camera lerps at `dt * 8` (up from `dt * 5`), so the view stays connected to the player's lateral movement instead of lagging behind it.
 - **Tab-hidden handling via RAF suspension** — the explicit `visibilitychange` auto-pause was removed (it fired spuriously inside embedded/iframe contexts where `document.hidden` is unreliable, freezing the run mid-play). A hidden tab already suspends `requestAnimationFrame`, and `clock.getDelta()` is capped at 0.05s, so the game freezes naturally while away and resumes cleanly without a time-jump when the tab returns.
 - **WebGL context-loss recovery** — a `webglcontextlost` listener cancels the animation loop and surfaces a reload prompt, so a mobile GPU context drop under memory pressure is a visible, recoverable state rather than a silent dead screen.
 - **GPU memory hygiene** — all candles share a single unit-cube geometry and two shared materials (green/red); height varies via `mesh.scale.y`. The previous per-candle geometry/material allocations were never disposed on despawn, leaking video memory for the whole session. Shared resources are disposed in teardown.
+
+### Combat feedback (hit impact)
+- **Camera shake** — taking a hit (rug flip or red-candle landing) fires a decaying shake impulse that jitters the camera position around its look-at target for ~0.3s, so damage reads as a physical punch rather than just a number ticking down.
+- **Damage vignette** — a red radial-gradient screen-edge overlay flashes on every hit, intensity-scaled (rug flip = 0.5, red landing = 0.3), fading over ~130ms.
+- **Hero red-tint flash** — the hero sprite's `SpriteMaterial.color` washes red on impact and eases back to white over 0.25s, so the character itself visibly reacts to the hit.
+- All three effects share a single `triggerHit(intensity)` call so the impact strength stays consistent across the shake, vignette, and tint.
 
 ### Entry flow (coin room)
 - Split-curtain door animation on entry

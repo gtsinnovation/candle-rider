@@ -75,6 +75,18 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   `;
   root.appendChild(combo);
 
+  // Damage vignette — a red radial-gradient overlay that flashes the screen
+  // edges when the player takes a hit (rug flip / red-candle landing), so
+  // damage reads as a visceral screen-space punch on top of the HUD number
+  // change and combo text.
+  const damageVignette = document.createElement('div');
+  damageVignette.style.cssText = `
+    position:absolute; inset:0; z-index:8; pointer-events:none;
+    background: radial-gradient(ellipse at center, transparent 35%, rgba(255,40,60,0.6) 100%);
+    opacity:0; transition:opacity .1s ease-out;
+  `;
+  root.appendChild(damageVignette);
+
   const hint = document.createElement('div');
   hint.style.cssText = `
     position:absolute; bottom:20px; right:22px; font-size:11px; color:#6f6f95;
@@ -321,6 +333,18 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   }
 
   drawChart(); // initial flat line at $0 before the run properly gets moving
+
+  // Combat hit feedback — fires a camera shake impulse, a red screen-edge
+  // vignette flash, and a brief hero red-tint, so taking damage feels like a
+  // punch rather than just a number ticking down. `intensity` scales all
+  // three (rug flip = 0.5, red-candle landing = 0.3).
+  function triggerHit(intensity) {
+    shakeAmount = Math.max(shakeAmount, intensity);
+    hitFlashTimer = Math.max(hitFlashTimer, 0.25);
+    damageVignette.style.opacity = String(Math.min(0.9, intensity * 1.4));
+    clearTimeout(triggerHit._t);
+    triggerHit._t = setTimeout(() => { damageVignette.style.opacity = '0'; }, 130);
+  }
 
   function popCombo(text, color) {
     combo.textContent = text;
@@ -635,6 +659,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   let animId = null;
   let landSquashTimer = 0; // counts down after landing, drives the squash/rebound animation
   let jumpBufferTimer = 0; // counts down; a jump press made just before landing is buffered and re-fired on touchdown
+  let shakeAmount = 0;     // camera shake impulse, decays each frame — set on combat hits
+  let hitFlashTimer = 0;   // counts down after a hit, drives the hero red-tint flash
   let lastInputTime = performance.now();
   let idleWarningShown = false;
 
@@ -888,7 +914,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     groundTexture.offset.y -= (speed * dt) / GROUND_CELL_SIZE;
 
     const targetX = LANES[laneIndex];
-    player.position.x += (targetX - player.position.x) * Math.min(1, dt * 16); // snappier lane transitions (~100ms) for a more responsive feel
+    player.position.x += (targetX - player.position.x) * Math.min(1, dt * 20); // snappier lane transitions (~75ms) so dodging between lanes feels immediate
     updateLaneDots();
 
     // Tick down the jump buffer; consumed on landing below.
@@ -908,6 +934,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
         if (onCandle === c) {
           gameState.reportHealth(Math.max(0, gameState.state.health - 14));
           popCombo('RUG FLIP! -14 HP', '#ff5577');
+          triggerHit(0.5);
         }
       }
 
@@ -970,6 +997,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
             gameState.addBag(-6);
             streak = 0;
             popCombo('LANDED ON RED', '#ff9955');
+            triggerHit(0.3);
           }
         }
         break;
@@ -993,8 +1021,18 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     }
 
     const camTarget = new THREE.Vector3(player.position.x * 0.6, player.position.y + 3.4 * WORLD_SCALE, player.position.z + 7.5 * WORLD_SCALE);
-    camera.position.lerp(camTarget, Math.min(1, dt * 5));
+    camera.position.lerp(camTarget, Math.min(1, dt * 8)); // tighter camera follow so the view feels connected to movement
     camera.lookAt(player.position.x * 0.6, player.position.y + 0.6, player.position.z - 4);
+
+    // Camera shake on combat hits — jitter the camera position around the
+    // look-at target, decaying over ~0.3s. Applied after lookAt so the
+    // aim point stays steady while the viewpoint punches.
+    if (shakeAmount > 0) {
+      shakeAmount = Math.max(0, shakeAmount - dt * 1.7);
+      const s = shakeAmount * 0.35;
+      camera.position.x += (Math.random() - 0.5) * s;
+      camera.position.y += (Math.random() - 0.5) * s;
+    }
     // ---------- Procedural sprite animation ("juice") ----------
     // Sprites always billboard to face the camera and ignore the parent
     // Group's rotation.y, so a plain rotation-based lean (what was here
@@ -1031,11 +1069,23 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       heroSprite.position.y = HERO_HEIGHT / 2 + Math.abs(bob) * 0.4;
     }
 
+    // Hero hit flash — tint the sprite red on a combat hit, easing back to
+    // white as the hitFlashTimer runs out. SpriteMaterial.color multiplies
+    // the texture, so this reads as a red wash over the hero art.
+    if (hitFlashTimer > 0) {
+      hitFlashTimer = Math.max(0, hitFlashTimer - dt);
+      const f = hitFlashTimer / 0.25; // 1 at impact → 0 as it fades
+      heroMat.color.setRGB(1, 1 - 0.7 * f, 1 - 0.7 * f);
+    } else {
+      heroMat.color.setRGB(1, 1, 1);
+    }
+
     // Bank/lean into lane changes — SpriteMaterial.rotation is an in-plane
     // (view-axis) roll, the one rotation a billboard sprite actually
-    // respects.
+    // respects. Tightened (dt * 12) so the lean catches up to the snappier
+    // lane transitions instead of lagging behind them.
     const leanTarget = (targetX - player.position.x) * -0.35;
-    heroMat.rotation += (leanTarget - heroMat.rotation) * Math.min(1, dt * 8);
+    heroMat.rotation += (leanTarget - heroMat.rotation) * Math.min(1, dt * 12);
 
     debugBox.textContent =
       `lane: ${laneIndex}  grounded: ${!jumping}\n` +
