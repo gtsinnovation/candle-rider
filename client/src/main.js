@@ -12,6 +12,18 @@ import { mountWarRoom } from './scenes/WarRoomScene.js';
 import { mountTrenchesScene } from './scenes/paths/TrenchesScene.js';
 import { eventBus } from './core/EventBus.js';
 
+// Fallback for mobile browsers that don't support the CSS `dvh` unit yet —
+// sets an --app-height custom property from the actual visible viewport
+// (window.innerHeight already correctly excludes the address bar on most
+// mobile browsers). Re-measured on resize/orientation change since the
+// address bar showing/hiding changes this value live.
+function updateAppHeight() {
+  document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+}
+updateAppHeight();
+window.addEventListener('resize', updateAppHeight);
+window.addEventListener('orientationchange', updateAppHeight);
+
 // Only Trenches is ported so far. Add each path scene here as it's built —
 // the War Room already renders cards for all 5 from shared/economy.js, it
 // just falls back to a console warning for paths not in this map yet.

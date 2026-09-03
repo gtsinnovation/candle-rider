@@ -19,10 +19,15 @@ import * as THREE from 'three';
 import { eventBus } from '../../core/EventBus.js';
 import { TRENCHES_COINS, getLastCoinId, setLastCoinId, getCoinById } from './trenchesCoins.js';
 
-const LANES = [-2.4, 0, 2.4];
-const CANDLE_W = 1.5;
-const CANDLE_D = 1.6;
-const DESPAWN_Z = 6;
+// World scale: candle blocks, lane spacing, and everything spatial except
+// the hero were reduced 25% (0.75x) — the hero's own size (HERO_HEIGHT
+// below) is deliberately left untouched, so it now reads as proportionally
+// larger/more prominent against the shrunk environment.
+const WORLD_SCALE = 0.75;
+const LANES = [-2.4 * WORLD_SCALE, 0, 2.4 * WORLD_SCALE];
+const CANDLE_W = 1.5 * WORLD_SCALE;
+const CANDLE_D = 1.6 * WORLD_SCALE;
+const DESPAWN_Z = 6 * WORLD_SCALE;
 const GRAVITY = -18; // partial rollback from -16 — that was floatier than the candle spacing/timing could actually support, causing jumps to overshoot past the landing window
 const IDLE_WARNING_MS = 9 * 60 * 1000;  // show a warning at 9 minutes of inactivity
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // auto-pause at 10 minutes of inactivity
@@ -209,6 +214,27 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   `;
   root.appendChild(idleWarning);
 
+  // Prominent controls toast — shown once, right as gameplay begins.
+  // The small corner hint text stays up the whole run for reference, but
+  // it's easy to miss entirely on a phone; this makes sure the controls
+  // are actually seen at the moment they matter.
+  const controlsToast = document.createElement('div');
+  controlsToast.style.cssText = `
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    background:rgba(10,10,24,.85); border:1px solid #3a3a6f; border-radius:12px;
+    padding:16px 22px; z-index:30; font-family:system-ui,sans-serif; text-align:center;
+    color:#eef0ff; opacity:0; transition:opacity .4s; pointer-events:none; max-width:80vw;
+  `;
+  root.appendChild(controlsToast);
+  function showControlsToast(durationMs = 3200) {
+    controlsToast.innerHTML = isTouchDevice
+      ? '<div style="font-size:20px;margin-bottom:6px;">👆 SWIPE to change lanes<br/>👆 TAP to jump</div><div style="font-size:11px;color:#9a9ac0;">Use the ⏸ and CASH OUT buttons up top</div>'
+      : '<div style="font-size:20px;margin-bottom:6px;">A/D or ←/→ to move · SPACE to jump</div><div style="font-size:11px;color:#9a9ac0;">ESC to cash out · P to pause</div>';
+    controlsToast.style.opacity = '1';
+    clearTimeout(showControlsToast._t);
+    showControlsToast._t = setTimeout(() => (controlsToast.style.opacity = '0'), durationMs);
+  }
+
   function popCombo(text, color) {
     combo.textContent = text;
     combo.style.color = color || '#ffd166';
@@ -234,6 +260,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     renderer.setSize(w, h);
   }
   canvasHost.appendChild(renderer.domElement);
+  renderer.domElement.style.touchAction = 'none';
   resize();
   window.addEventListener('resize', resize);
 
@@ -317,7 +344,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   const groundTexture = new THREE.CanvasTexture(gridCanvas);
   groundTexture.wrapS = THREE.RepeatWrapping;
   groundTexture.wrapT = THREE.RepeatWrapping;
-  const GROUND_CELL_SIZE = 5; // world units per texture repeat, matches old GridHelper's cell size
+  const GROUND_CELL_SIZE = 5 * WORLD_SCALE; // world units per texture repeat, scaled to match the shrunk candle/lane world
   groundTexture.repeat.set(400 / GROUND_CELL_SIZE, 400 / GROUND_CELL_SIZE);
 
   const groundMat = new THREE.MeshBasicMaterial({ map: groundTexture, transparent: true, opacity: 0.6 });
@@ -446,7 +473,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
   function spawnCandle(z, forcedLane) {
     const lane = forcedLane !== undefined ? forcedLane : Math.floor(Math.random() * 3);
-    const height = 0.6 + Math.random() * 1.6;
+    const height = (0.6 + Math.random() * 1.6) * WORLD_SCALE;
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(CANDLE_W, height, CANDLE_D), candleMaterial(GREEN));
     mesh.position.set(LANES[lane], height / 2 - 1.2, z);
     scene.add(mesh);
@@ -469,10 +496,10 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // to catch a mid-air faller.
   const startCandle = spawnCandle(0, 1); // lane 1 = LANES[1] = 0, matches player's starting lane
 
-  let cursorZ = -4;
+  let cursorZ = -4 * WORLD_SCALE;
   for (let i = 0; i < 24; i++) {
     spawnCandle(cursorZ);
-    cursorZ -= 3.4 + Math.random() * 1.4;
+    cursorZ -= (3.4 + Math.random() * 1.4) * WORLD_SCALE;
   }
 
   // ---------- STATE ----------
@@ -529,6 +556,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
     lastInputTime = performance.now();
     started = true;
+    showControlsToast();
   }
 
   function pauseGame(reason) {
@@ -732,7 +760,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       if (nextCursorZ === null || c.mesh.position.z < nextCursorZ) nextCursorZ = c.mesh.position.z;
     }
     while (candles.length < 24 && !ended) {
-      cursorZ = (nextCursorZ !== null ? nextCursorZ : -4) - (3.4 + Math.random() * 1.4);
+      cursorZ = (nextCursorZ !== null ? nextCursorZ : -4 * WORLD_SCALE) - (3.4 + Math.random() * 1.4) * WORLD_SCALE;
       spawnCandle(cursorZ);
       nextCursorZ = cursorZ;
     }
@@ -790,7 +818,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       lose('LIQUIDATED', 'Health hit zero after one too many rugs.');
     }
 
-    const camTarget = new THREE.Vector3(player.position.x * 0.6, player.position.y + 3.4, player.position.z + 7.5);
+    const camTarget = new THREE.Vector3(player.position.x * 0.6, player.position.y + 3.4 * WORLD_SCALE, player.position.z + 7.5 * WORLD_SCALE);
     camera.position.lerp(camTarget, Math.min(1, dt * 5));
     camera.lookAt(player.position.x * 0.6, player.position.y + 0.6, player.position.z - 4);
     // ---------- Procedural sprite animation ("juice") ----------
