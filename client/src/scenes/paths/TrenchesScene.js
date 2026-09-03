@@ -634,6 +634,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   let difficulty = getCoinById(getLastCoinId());
   let animId = null;
   let landSquashTimer = 0; // counts down after landing, drives the squash/rebound animation
+  let jumpBufferTimer = 0; // counts down; a jump press made just before landing is buffered and re-fired on touchdown
   let lastInputTime = performance.now();
   let idleWarningShown = false;
 
@@ -740,6 +741,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   const MAX_JUMP_TAPS = 3;   // 1 launch + up to 2 step-up boosts per airborne phase
   const JUMP_LAUNCH_VEL = 7.5; // unchanged from the original tuned jump
   const JUMP_BOOST_VEL = 5.5;  // smaller "step up" kick for each extra tap while airborne
+  const JUMP_BUFFER_WINDOW = 0.12; // seconds — a jump press within this long before landing is buffered
 
   function tryJump() {
     if (!jumping) {
@@ -747,6 +749,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       jumping = true;
       jumpChainCount = 1;
       velY = JUMP_LAUNCH_VEL;
+      jumpBufferTimer = 0;
       return;
     }
     // Already airborne — each additional tap gives one more incremental
@@ -756,6 +759,12 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     if (jumpChainCount < MAX_JUMP_TAPS) {
       jumpChainCount++;
       velY = JUMP_BOOST_VEL;
+    } else {
+      // At the step-up cap — buffer the press so that if the player lands
+      // within the buffer window, a fresh launch fires immediately on
+      // touchdown. This removes the "I pressed jump a hair too early and
+      // nothing happened" frustration that makes runners feel unresponsive.
+      jumpBufferTimer = JUMP_BUFFER_WINDOW;
     }
   }
 
@@ -879,8 +888,11 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     groundTexture.offset.y -= (speed * dt) / GROUND_CELL_SIZE;
 
     const targetX = LANES[laneIndex];
-    player.position.x += (targetX - player.position.x) * Math.min(1, dt * 12);
+    player.position.x += (targetX - player.position.x) * Math.min(1, dt * 16); // snappier lane transitions (~100ms) for a more responsive feel
     updateLaneDots();
+
+    // Tick down the jump buffer; consumed on landing below.
+    if (jumpBufferTimer > 0) jumpBufferTimer = Math.max(0, jumpBufferTimer - dt);
 
     velY += GRAVITY * dt;
     player.position.y += velY * dt;
@@ -935,6 +947,17 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
         jumping = false;
         jumpChainCount = 0;
         onCandle = c;
+
+        // Buffered jump: if the player pressed jump within the buffer window
+        // before touchdown, fire a fresh launch immediately instead of
+        // eating the input — keeps the bounce rhythm feeling tight.
+        if (jumpBufferTimer > 0) {
+          jumping = true;
+          jumpChainCount = 1;
+          velY = JUMP_LAUNCH_VEL;
+          jumpBufferTimer = 0;
+          landSquashTimer = 0; // skipping the squash — going straight back up
+        }
 
         if (!c.scored) {
           c.scored = true;
@@ -1041,14 +1064,13 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   }
   animate();
 
-  // ---------- Robustness: auto-pause on tab hidden, recover on context loss
-  function onVisibilityChange() {
-    if (document.hidden && started && !ended && !paused) {
-      pauseGame('Auto-paused — you switched away from the game.');
-    }
-  }
-  document.addEventListener('visibilitychange', onVisibilityChange);
-
+  // ---------- Robustness: recover on context loss
+  // Note: an explicit `visibilitychange` auto-pause was removed — in the
+  // preview iframe (and some embedded contexts) `document.hidden` is
+  // unreliable and fired spuriously, freezing the run mid-play. A hidden
+  // tab already suspends `requestAnimationFrame`, and `clock.getDelta()`
+  // is capped at 0.05s, so the game naturally freezes while the tab is
+  // away and resumes cleanly when it returns — no explicit pause needed.
   function onContextLost(e) {
     e.preventDefault();
     cancelAnimationFrame(animId);
@@ -1070,7 +1092,6 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     window.removeEventListener('resize', resize);
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerUp);
-    document.removeEventListener('visibilitychange', onVisibilityChange);
     renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
     renderer.domElement.removeEventListener('pointerdown', onPointerDown);
     renderer.domElement.removeEventListener('wheel', onWheel);

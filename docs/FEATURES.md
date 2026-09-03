@@ -1,7 +1,7 @@
 # Candle Rider — Technical Features
 
 A running inventory of implemented systems, kept up to date as the project grows.
-Last updated: alongside the Trenches step-jump + Bag Value chart additions.
+Last updated: alongside the Trenches core-loop responsiveness pass (jump buffering, snappier lanes, freeze fix, run-start timing).
 
 ---
 
@@ -37,18 +37,27 @@ Last updated: alongside the Trenches step-jump + Bag Value chart additions.
 
 - Global stats panel: Level, Bag, PNL, Health, Energy, Conviction, Reputation, Conviction Shards
 - Responsive: narrower/more compact on mobile viewports
+- Built once on mount; only the value text nodes update on `state:changed` (which fires every frame during a run) — no per-frame `innerHTML` rebuild, so the HUD stays cheap even while Bag/Energy tick continuously
 
 ## Trenches Path (Path 1 — Memecoin & Trenches Degen)
 
 ### Core loop
 - 3-lane candle-jumping endless runner; candles flip green→red on a timer
 - Guaranteed starting platform (fixes an early "instant void-fall" class of bug)
+- The run begins when the player apes into a coin (ape-in), **not** on the War Room card click — so the run clock and the Health/Energy reset happen at the moment gameplay starts, not while browsing the coin room
 - Cash out banks the run's Bag as permanent PNL/Reputation; any loss (rug, void-fall, burnout, liquidation, mid-run exit) forfeits it — the core risk/reward tension
 
 ### Step jump
 - Tapping jump again *while already airborne* applies an additional smaller upward boost, letting the player climb higher mid-jump
 - Capped at 3 total activations per airborne phase (1 launch + 2 step-ups) — resets the instant the player lands, so it can't be used to just fly over the whole mechanic
 - Launch velocity 7.5, step-up boost 5.5, gravity -18
+
+### Responsiveness & feel
+- **Jump buffering** — a jump press made within 120ms of touchdown is buffered and re-fired as a fresh launch the instant the player lands, instead of being eaten. Removes the "I pressed jump a hair too early and nothing happened" frustration that makes runners feel unresponsive. Only engages once the step-up cap is reached, so it never conflicts with the mid-air boost mechanic.
+- **Snappier lane transitions** — the hero lerps to the target lane at `dt * 16` (~100ms to settle), tightened from `dt * 12` so dodging between candle lanes feels immediate rather than floaty. The banking-lean animation lags slightly behind the snap, which reads as natural weight shift.
+- **Tab-hidden handling via RAF suspension** — the explicit `visibilitychange` auto-pause was removed (it fired spuriously inside embedded/iframe contexts where `document.hidden` is unreliable, freezing the run mid-play). A hidden tab already suspends `requestAnimationFrame`, and `clock.getDelta()` is capped at 0.05s, so the game freezes naturally while away and resumes cleanly without a time-jump when the tab returns.
+- **WebGL context-loss recovery** — a `webglcontextlost` listener cancels the animation loop and surfaces a reload prompt, so a mobile GPU context drop under memory pressure is a visible, recoverable state rather than a silent dead screen.
+- **GPU memory hygiene** — all candles share a single unit-cube geometry and two shared materials (green/red); height varies via `mesh.scale.y`. The previous per-candle geometry/material allocations were never disposed on despawn, leaking video memory for the whole session. Shared resources are disposed in teardown.
 
 ### Entry flow (coin room)
 - Split-curtain door animation on entry
@@ -80,6 +89,7 @@ Last updated: alongside the Trenches step-jump + Bag Value chart additions.
 - Mouse: left-click to jump during gameplay, drag-orbit in the coin room
 - Touch: swipe left/right for lanes, tap to jump, dedicated on-screen Pause/Cash-Out buttons (mobile has no keyboard)
 - Context-aware controls toast — shown once at run start, bottom-left, auto-dismissing; text adapts to touch vs. keyboard/mouse
+- Lane changes register instantly on keydown (the visual lerp follows); jumps are buffered (see Responsiveness & feel) so input never feels lost
 
 ### Debug tooling
 - Live physics readout (lane, grounded state, vertical velocity, speed, current candle color) in the corner — auto-hidden on narrow mobile viewports since it's a dev tool, not player-facing
