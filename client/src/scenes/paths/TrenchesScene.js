@@ -1035,14 +1035,25 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       const c = candles[i];
       c.mesh.position.z += speed * dt;
 
-      if (c.color === 'green' && performance.now() > c.flipAt) {
-        c.color = 'red';
-        c.mesh.material = redMat; // swap to the shared red material (no per-candle alloc)
-        if (onCandle === c) {
-          gameState.reportHealth(Math.max(0, gameState.state.health - 14));
-          popCombo('RUG FLIP! -14 HP', '#ff5577');
-          triggerHit(0.5);
+      if (performance.now() > c.flipAt) {
+        if (c.color === 'green') {
+          c.color = 'red';
+          c.mesh.material = redMat; // swap to the shared red material (no per-candle alloc)
+          if (onCandle === c) {
+            gameState.reportHealth(Math.max(0, gameState.state.health - 14));
+            popCombo('RUG FLIP! -14 HP', '#ff5577');
+            triggerHit(0.5);
+          }
+        } else {
+          // Trend reversal — a red candle flips back to green, so trends
+          // aren't one-way: riding out a red candle can recover into a
+          // green one and start accruing Bag again.
+          c.color = 'green';
+          c.mesh.material = greenMat;
+          if (onCandle === c) popCombo('TREND REVERSAL', '#7dffcf');
         }
+        // schedule the next trend flip in either direction
+        c.flipAt = performance.now() + 1800 + Math.random() * 2600;
       }
 
       if (c.mesh.position.z > DESPAWN_Z) {
