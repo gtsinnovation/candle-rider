@@ -8,7 +8,7 @@
 // Systematic) are ported in from the standalone Three.js prototypes — this
 // file only owns navigation, not gameplay.
 
-import { PATHS, heroArtUrl } from '@candle-rider/shared';
+import { PATHS, heroArtUrl, bossArtUrl } from '@candle-rider/shared';
 import { eventBus } from '../core/EventBus.js';
 
 let stylesInjected = false;
@@ -67,8 +67,15 @@ export function mountWarRoom(container, gameState, onSelectPath) {
           <div style="font-size:13px;font-weight:700;margin-bottom:2px;">${path.name}</div>
           <div style="font-size:10px;color:#9a9ac0;margin-bottom:6px;">${path.theme}</div>
           <div style="font-size:11px;color:#9a9ac0;margin-bottom:10px;">${path.genre}</div>
-          <div style="font-size:11px;margin-bottom:4px;">Mastery Lv. ${mastery}</div>
-          <div style="font-size:10px;color:#7d7da0;">Boss: ${path.boss.name}</div>
+          <div style="font-size:11px;margin-bottom:8px;">Mastery Lv. ${mastery}</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <img src="${bossArtUrl(path.id)}" alt="${path.boss.name}"
+              style="width:48px;height:48px;object-fit:cover;border-radius:6px;${unlocked ? '' : 'filter:grayscale(1);'}" />
+            <div>
+              <div style="font-size:9px;color:#7d7da0;text-transform:uppercase;letter-spacing:.5px;">Nemesis</div>
+              <div style="font-size:10px;color:#eef0ff;font-weight:600;">${path.boss.name}</div>
+            </div>
+          </div>
         </div>
       `;
 
