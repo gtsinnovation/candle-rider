@@ -243,6 +243,36 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   `;
   root.appendChild(idleWarning);
 
+  // ---------- Market events (Pump Wave / FUD Wave) ----------
+  // Gives a run an actual shape/rhythm instead of flat, undifferentiated
+  // repetition — periodic alternating windows of "safer and better" vs
+  // "riskier and tenser," each clearly announced.
+  const eventBanner = document.createElement('div');
+  eventBanner.style.cssText = `
+    position:absolute; top:130px; left:50%; transform:translate(-50%,-10px);
+    font-family:system-ui,sans-serif; font-weight:800; font-size:22px; text-align:center;
+    z-index:20; opacity:0; transition:opacity .3s, transform .3s; pointer-events:none;
+    text-shadow:0 0 16px currentColor;
+  `;
+  root.appendChild(eventBanner);
+
+  const eventVignette = document.createElement('div');
+  eventVignette.style.cssText = `
+    position:absolute; inset:0; z-index:4; pointer-events:none; opacity:0; transition:opacity .5s;
+  `;
+  root.appendChild(eventVignette);
+
+  function showEventBanner(text, color) {
+    eventBanner.textContent = text;
+    eventBanner.style.color = color;
+    eventBanner.style.opacity = '1';
+    eventBanner.style.transform = 'translate(-50%,0)';
+    setTimeout(() => {
+      eventBanner.style.opacity = '0';
+      eventBanner.style.transform = 'translate(-50%,-10px)';
+    }, 2200);
+  }
+
   // Prominent controls toast — shown once, right as gameplay begins.
   // The small corner hint text stays up the whole run for reference, but
   // it's easy to miss entirely on a phone; this makes sure the controls
@@ -597,6 +627,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   const GREEN_COLOR = new THREE.Color(GREEN);
   const WARN_COLOR = new THREE.Color(0xffaa33);
   const FLIP_WARNING_MS = 650; // candles flicker amber for this long before actually flipping to red
+  let activeEvent = null; // null | 'pump' | 'fud' — set by the periodic market-event system below, read by spawnCandle
 
   function candleMaterial(color) {
     return new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.55, roughness: 0.4 });
@@ -608,9 +639,15 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(CANDLE_W, height, CANDLE_D), candleMaterial(GREEN));
     mesh.position.set(LANES[lane], height / 2 - 1.2, z);
     scene.add(mesh);
+    // Fuse length depends on the active market event: Pump Waves give
+    // candles a long, safe fuse (a reward window); FUD Waves give them a
+    // very short one (a tense, high-risk window). Normal spawns in between.
+    let fuseMin = 1800, fuseRange = 2600;
+    if (activeEvent === 'pump') { fuseMin = 6000; fuseRange = 2000; }
+    else if (activeEvent === 'fud') { fuseMin = 400; fuseRange = 600; }
     const candle = {
       mesh, lane, height, color: 'green',
-      flipAt: performance.now() + 1800 + Math.random() * 2600,
+      flipAt: performance.now() + fuseMin + Math.random() * fuseRange,
       scored: false,
       warningPlayed: false,
     };
@@ -653,6 +690,11 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   let difficulty = getCoinById(getLastCoinId());
   let animId = null;
   let landSquashTimer = 0; // counts down after landing, drives the squash/rebound animation
+  const MARKET_EVENT_INTERVAL = 22; // seconds between events
+  const MARKET_EVENT_DURATION = 6;  // seconds each event lasts
+  let nextEventAt = 15;   // first event fires at 15s in — gives a little runway before the first hit
+  let eventEndsAt = 0;
+  let eventCount = 0;     // used to alternate pump/fud, starting with pump
   let lastInputTime = performance.now();
   let idleWarningShown = false;
 
@@ -870,6 +912,29 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // ---------- LOOP ----------
   const clock = new THREE.Clock();
 
+  function triggerMarketEvent() {
+    const type = eventCount % 2 === 0 ? 'pump' : 'fud'; // always starts with a Pump Wave first
+    eventCount++;
+    activeEvent = type;
+    eventEndsAt = elapsed + MARKET_EVENT_DURATION;
+    if (type === 'pump') {
+      sfx.pumpWave();
+      showEventBanner('🚀 PUMP WAVE!', '#7dffcf');
+      eventVignette.style.background = 'radial-gradient(ellipse at center, transparent 55%, rgba(125,255,207,.22) 100%)';
+    } else {
+      sfx.fudWave();
+      showEventBanner('😱 FUD WAVE!', '#ff5577');
+      eventVignette.style.background = 'radial-gradient(ellipse at center, transparent 45%, rgba(255,85,119,.28) 100%)';
+    }
+    eventVignette.style.opacity = '1';
+  }
+
+  function endMarketEvent() {
+    activeEvent = null;
+    eventVignette.style.opacity = '0';
+    nextEventAt = elapsed + MARKET_EVENT_INTERVAL;
+  }
+
   function update(dt) {
     elapsed += dt;
 
@@ -889,6 +954,9 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     }
 
     speed = difficulty.base + Math.min(elapsed * difficulty.ramp, difficulty.cap);
+
+    if (!activeEvent && elapsed >= nextEventAt) triggerMarketEvent();
+    if (activeEvent && elapsed >= eventEndsAt) endMarketEvent();
 
     chartSampleTimer += dt;
     if (chartSampleTimer >= CHART_SAMPLE_INTERVAL) {
@@ -987,7 +1055,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
         if (!c.scored) {
           c.scored = true;
           if (c.color === 'green') {
-            const gain = 8 + Math.floor(Math.random() * 10);
+            const baseGain = 8 + Math.floor(Math.random() * 10);
+            const gain = activeEvent === 'pump' ? Math.round(baseGain * 1.5) : baseGain;
             gameState.addBag(gain);
             streak += 1;
             sfx.landGreen();

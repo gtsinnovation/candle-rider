@@ -96,6 +96,12 @@ Last updated: alongside the Trenches step-jump + Bag Value chart additions.
 ### Level-up celebration
 - `player:levelUp` previously only logged to console — now shows a real on-screen banner (global, works regardless of active scene) plus a chime, so leveling up is an actual visible moment instead of invisible background state
 
+### Market events (mid-run escalation)
+- A run previously had no shape — flat repetition until the player chose to stop or died. Now, every ~22 seconds, an alternating event fires (always starting with a Pump Wave, so new players see the rewarding version first)
+- **Pump Wave** (~6s): newly-spawned candles get a much longer, safer fuse before flipping red, plus a 1.5× Bag multiplier on green landings — a clear reward window
+- **FUD Wave** (~6s): newly-spawned candles flip almost immediately — a tense, high-risk window that punishes careless play
+- Each event is announced with a banner, distinct sound, and a persistent color-tinted screen-edge vignette for the event's duration
+
 ### Red-flip warning telegraph
 - Candles now flicker amber (pulsing faster as the flip approaches) for ~650ms before actually turning red, instead of flipping silently with no warning
 - A subtle audio tick fires once, only for the candle the player is currently standing on (not every candle in every lane, which would be noisy)

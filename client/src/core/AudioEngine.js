@@ -66,4 +66,10 @@ export const sfx = {
   streak: (level) => tone({ freq: 500 + Math.min(level, 10) * 40, duration: 0.1, type: 'sine', gain: 0.12 }),
   pause: () => tone({ freq: 300, freqEnd: 220, duration: 0.1, type: 'sine', gain: 0.1 }),
   warning: () => tone({ freq: 700, duration: 0.08, type: 'square', gain: 0.1 }),
+  pumpWave: () => {
+    [392, 494, 587, 784].forEach((f, i) => tone({ freq: f, duration: 0.2, type: 'triangle', gain: 0.17, delay: i * 0.09 }));
+  },
+  fudWave: () => {
+    [300, 220, 160].forEach((f, i) => tone({ freq: f, freqEnd: f * 0.7, duration: 0.35, type: 'sawtooth', gain: 0.16, delay: i * 0.12 }));
+  },
 };
