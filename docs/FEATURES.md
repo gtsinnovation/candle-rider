@@ -107,6 +107,12 @@ Last updated: alongside the Trenches step-jump + Bag Value chart additions.
 - A subtle audio tick fires once, only for the candle the player is currently standing on (not every candle in every lane, which would be noisy)
 - Turns rug-flip damage from a "gotcha" into a readable, reactable hazard — same underlying odds, meaningfully fairer *feel*
 
+### New-player onboarding
+- A brand-new player was previously dropped straight into free-look camera controls and 11 unlabeled-risk coins with no guidance beyond a small persistent hint
+- Now: a one-time welcome modal (genuinely first visit only, tracked via localStorage, never shown again after) explains the core loop — green vs. red candles, how coin choice sets pace, controls (adapted to touch vs. keyboard/mouse), and the cash-out risk/reward — before the room becomes interactive
+- Doesn't restrict coin choice or force a "training wheels" mode — informs, then respects the player's own decision, consistent with how the rest of the game treats difficulty as a fully player-owned choice
+- Dismissible by click or Enter key
+
 ### Coin art
 - Replaced the flat solid-color placeholder discs with real textured coin art (11 images derived from 5 source designs)
 - Since only 5 unique designs existed for 11 coin slots, most were generated as hue-shifted variants of the originals (measured each source's actual dominant hue numerically first, rather than guessing, since a couple of the images turned out more amber/multicolor than they first appeared) — gives each coin a genuinely distinct look while keeping a coherent shared art style
