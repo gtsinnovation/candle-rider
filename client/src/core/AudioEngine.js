@@ -65,4 +65,5 @@ export const sfx = {
   },
   streak: (level) => tone({ freq: 500 + Math.min(level, 10) * 40, duration: 0.1, type: 'sine', gain: 0.12 }),
   pause: () => tone({ freq: 300, freqEnd: 220, duration: 0.1, type: 'sine', gain: 0.1 }),
+  warning: () => tone({ freq: 700, duration: 0.08, type: 'square', gain: 0.1 }),
 };

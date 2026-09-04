@@ -30,7 +30,8 @@ Last updated: alongside the Trenches step-jump + Bag Value chart additions.
 ## War Room Hub
 
 - DOM-rendered path-select cards, generated from `shared/economy.js` path data
-- Hero art per card; locked paths shown grayscale and non-interactive
+- Hero art per card, `object-fit: contain` (shows the full portrait image consistently across all 5 paths — `cover` was cropping inconsistently since each piece of art has a different composition)
+- Locked paths shown grayscale and non-interactive
 - Live mastery level per path
 
 ## HUD
@@ -94,6 +95,11 @@ Last updated: alongside the Trenches step-jump + Bag Value chart additions.
 
 ### Level-up celebration
 - `player:levelUp` previously only logged to console — now shows a real on-screen banner (global, works regardless of active scene) plus a chime, so leveling up is an actual visible moment instead of invisible background state
+
+### Red-flip warning telegraph
+- Candles now flicker amber (pulsing faster as the flip approaches) for ~650ms before actually turning red, instead of flipping silently with no warning
+- A subtle audio tick fires once, only for the candle the player is currently standing on (not every candle in every lane, which would be noisy)
+- Turns rug-flip damage from a "gotcha" into a readable, reactable hazard — same underlying odds, meaningfully fairer *feel*
 
 ### Fixed: candle memory leak
 - Candle geometry/material were never disposed on despawn — every spawn/despawn cycle over a long session leaked GPU resources. Now disposed both on despawn and on scene teardown (for any candles still active when a run ends)

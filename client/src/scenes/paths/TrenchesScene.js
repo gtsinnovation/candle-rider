@@ -594,6 +594,9 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   const candles = [];
   const GREEN = 0x00ff77;
   const RED = 0xff3355;
+  const GREEN_COLOR = new THREE.Color(GREEN);
+  const WARN_COLOR = new THREE.Color(0xffaa33);
+  const FLIP_WARNING_MS = 650; // candles flicker amber for this long before actually flipping to red
 
   function candleMaterial(color) {
     return new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.55, roughness: 0.4 });
@@ -609,6 +612,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       mesh, lane, height, color: 'green',
       flipAt: performance.now() + 1800 + Math.random() * 2600,
       scored: false,
+      warningPlayed: false,
     };
     candles.push(candle);
     return candle;
@@ -910,16 +914,34 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       const c = candles[i];
       c.mesh.position.z += speed * dt;
 
-      if (c.color === 'green' && performance.now() > c.flipAt) {
-        c.color = 'red';
-        c.mesh.material.color.setHex(RED);
-        c.mesh.material.emissive.setHex(RED);
-        if (onCandle === c) {
-          gameState.reportHealth(Math.max(0, gameState.state.health - 14));
-          sfx.damage();
-          streak = 0;
-          updateStreakDisplay();
-          popCombo('RUG FLIP! -14 HP', '#ff5577');
+      if (c.color === 'green') {
+        const msUntilFlip = c.flipAt - performance.now();
+        if (msUntilFlip > 0 && msUntilFlip < FLIP_WARNING_MS) {
+          if (!c.warningPlayed && onCandle === c) {
+            c.warningPlayed = true;
+            sfx.warning();
+          }
+          // Pulsing amber warning, speeding up the closer it gets to
+          // actually flipping — gives the player a real, readable window
+          // to jump away or brace for the hit, instead of a silent flip.
+          const warningProgress = 1 - msUntilFlip / FLIP_WARNING_MS; // 0 -> 1 as flip approaches
+          const pulseRate = 8 + warningProgress * 14;
+          const pulse = (Math.sin(performance.now() * 0.001 * pulseRate) + 1) / 2; // 0..1
+          c.mesh.material.emissive.copy(GREEN_COLOR).lerp(WARN_COLOR, pulse * 0.7);
+          c.mesh.material.emissiveIntensity = 0.55 + pulse * 0.6;
+        }
+        if (performance.now() > c.flipAt) {
+          c.color = 'red';
+          c.mesh.material.color.setHex(RED);
+          c.mesh.material.emissive.setHex(RED);
+          c.mesh.material.emissiveIntensity = 0.55;
+          if (onCandle === c) {
+            gameState.reportHealth(Math.max(0, gameState.state.health - 14));
+            sfx.damage();
+            streak = 0;
+            updateStreakDisplay();
+            popCombo('RUG FLIP! -14 HP', '#ff5577');
+          }
         }
       }
 
