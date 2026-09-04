@@ -107,6 +107,11 @@ Last updated: alongside the Trenches step-jump + Bag Value chart additions.
 - A subtle audio tick fires once, only for the candle the player is currently standing on (not every candle in every lane, which would be noisy)
 - Turns rug-flip damage from a "gotcha" into a readable, reactable hazard — same underlying odds, meaningfully fairer *feel*
 
+### Fixed: candles arriving pre-flipped (critical)
+- The red-flip timer counted down from **spawn time**, not from when a candle actually became reachable. Since the candle queue spans ~74 units of depth but travel time from spawn to the player (11-18s at typical speeds) was far longer than the flip fuse itself (1.8-4.4s), **virtually every candle had already flipped red long before it was ever landable** — a player could go tens of seconds seeing almost no green candles at all
+- Fixed by adding each candle's estimated travel time (distance ÷ current speed) to its flip timer, so the "green window" now actually starts once the candle is near enough to matter
+- Applied to both live spawning during a run and the initial queue's timer refresh in `apeIntoCoin`
+
 ### Fixed: candle memory leak
 - Candle geometry/material were never disposed on despawn — every spawn/despawn cycle over a long session leaked GPU resources. Now disposed both on despawn and on scene teardown (for any candles still active when a run ends)
 

@@ -622,6 +622,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   player.add(playerGlow);
 
   const candles = [];
+  let speed = 6; // base scroll speed — lowered from 9 for a gentler start; declared here (not in the later STATE block) so spawnCandle can reference it below
   const GREEN = 0x00ff77;
   const RED = 0xff3355;
   const GREEN_COLOR = new THREE.Color(GREEN);
@@ -645,9 +646,17 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     let fuseMin = 1800, fuseRange = 2600;
     if (activeEvent === 'pump') { fuseMin = 6000; fuseRange = 2000; }
     else if (activeEvent === 'fud') { fuseMin = 400; fuseRange = 600; }
+
+    // The fuse must start counting from when the candle actually becomes
+    // REACHABLE, not from the moment it's created far away — otherwise a
+    // candle spawned deep in the queue (which can take 10+ seconds to
+    // scroll into range) has already flipped red long before the player
+    // could ever land on it, since the fuse itself is only ~2-4.4s. This
+    // was a real structural bug: virtually every candle arrived pre-flipped.
+    const travelSeconds = Math.abs(z) / Math.max(speed, 0.1);
     const candle = {
       mesh, lane, height, color: 'green',
-      flipAt: performance.now() + fuseMin + Math.random() * fuseRange,
+      flipAt: performance.now() + travelSeconds * 1000 + fuseMin + Math.random() * fuseRange,
       scored: false,
       warningPlayed: false,
     };
@@ -681,7 +690,6 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   let jumping = true;
   let jumpChainCount = 0; // resets to 0 on every landing — tracks taps within the current airborne phase
   let onCandle = null;
-  let speed = 6; // base scroll speed — lowered from 9 for a gentler start
   let elapsed = 0;
   let streak = 0;
   let ended = false;
@@ -738,9 +746,14 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
     // Refresh every currently-spawned candle's flip timer relative to NOW —
     // avoids an unfair instant flip if the player spent a while in the room.
+    // Also applies the same travel-time-aware fuse as spawnCandle (see the
+    // comment there) using the coin's chosen base speed, since the whole
+    // initial queue spans far more distance than a flat 2-4.4s fuse could
+    // ever survive intact.
     const now = performance.now();
     candles.forEach((c) => {
-      c.flipAt = now + 1800 + Math.random() * 2600;
+      const travelSeconds = Math.abs(c.mesh.position.z) / Math.max(coin.base, 0.1);
+      c.flipAt = now + travelSeconds * 1000 + 1800 + Math.random() * 2600;
     });
 
     lastInputTime = performance.now();
