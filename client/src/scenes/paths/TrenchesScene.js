@@ -498,21 +498,21 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
   // ---------- Memecoin room — the ape-in selector that replaced the old
   // Beginner/Middle/Master text buttons ----------
-  function makeCoinLabelTexture(coin) {
+  function makeCoinLabelTexture(coin, locked) {
     const c = document.createElement('canvas');
     c.width = 256; c.height = 128;
     const ctx = c.getContext('2d');
     ctx.fillStyle = 'rgba(0,0,0,0)';
     ctx.fillRect(0, 0, 256, 128);
     ctx.font = 'bold 40px system-ui, sans-serif';
-    ctx.fillStyle = '#' + coin.color.toString(16).padStart(6, '0');
+    ctx.fillStyle = locked ? '#555566' : '#' + coin.color.toString(16).padStart(6, '0');
     ctx.textAlign = 'center';
     ctx.shadowColor = 'rgba(0,0,0,.8)';
     ctx.shadowBlur = 10;
-    ctx.fillText(coin.symbol, 128, 60);
+    ctx.fillText(locked ? '🔒 ' + coin.symbol : coin.symbol, 128, 60);
     ctx.font = '20px system-ui, sans-serif';
-    ctx.fillStyle = '#c9c9e6';
-    ctx.fillText(coin.name, 128, 95);
+    ctx.fillStyle = locked ? '#7a7a90' : '#c9c9e6';
+    ctx.fillText(locked ? `Mastery Lv.${coin.requiresMastery} required` : coin.name, 128, 95);
     return new THREE.CanvasTexture(c);
   }
 
@@ -522,7 +522,10 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   const ARC_RADIUS = 6.2;
   const ARC_SPAN = Math.PI * 0.75; // ~135° total spread
 
+  const trenchesMastery = gameState.state.pathMastery?.trenches ?? 0;
+
   const coinMeshes = TRENCHES_COINS.map((coin, i) => {
+    const isLocked = (coin.requiresMastery ?? 0) > trenchesMastery;
     const t = TRENCHES_COINS.length === 1 ? 0 : i / (TRENCHES_COINS.length - 1);
     const angle = -ARC_SPAN / 2 + t * ARC_SPAN;
     const x = orbitTarget.x + Math.sin(angle) * ARC_RADIUS;
@@ -532,21 +535,26 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     group.position.set(x, 1.1, z);
     group.lookAt(orbitTarget.x, group.position.y, orbitTarget.z); // each coin faces the center of the arc, not just whichever way it happened to spawn
 
+    const coinTexture = new THREE.TextureLoader().load(`/assets/coins/${coin.id}.png`);
     const disc = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.55, 0.55, 0.12, 24),
-      new THREE.MeshStandardMaterial({ color: coin.color, emissive: coin.color, emissiveIntensity: 0.7, roughness: 0.35, metalness: 0.4 })
+      new THREE.CircleGeometry(0.55, 32), // matches the original placeholder disc's radius exactly
+      new THREE.MeshBasicMaterial({
+        map: coinTexture,
+        color: isLocked ? 0x444455 : 0xffffff, // multiplies with the texture — dims/desaturates locked coins without needing a separate grayscale asset
+        transparent: true,
+      })
     );
     disc.rotation.x = Math.PI / 2; // stand the coin upright, flat face toward the viewer, instead of lying flat like a hockey puck
     group.add(disc);
 
-    const labelMat = new THREE.SpriteMaterial({ map: makeCoinLabelTexture(coin), transparent: true });
+    const labelMat = new THREE.SpriteMaterial({ map: makeCoinLabelTexture(coin, isLocked), transparent: true });
     const label = new THREE.Sprite(labelMat);
     label.scale.set(1.6, 0.8, 1);
     label.position.y = 0.95;
     group.add(label);
 
     scene.add(group);
-    return { coin, group, disc, baseY: 1.1, bobPhase: Math.random() * Math.PI * 2 };
+    return { coin, group, disc, baseY: 1.1, bobPhase: Math.random() * Math.PI * 2, locked: isLocked };
   });
 
   const raycaster = new THREE.Raycaster();
@@ -629,15 +637,37 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   const WARN_COLOR = new THREE.Color(0xffaa33);
   const FLIP_WARNING_MS = 650; // candles flicker amber for this long before actually flipping to red
   let activeEvent = null; // null | 'pump' | 'fud' — set by the periodic market-event system below, read by spawnCandle
+  const recentSpawnColors = []; // last few spawn colors, used to prevent long monochrome streaks
+  const MAX_COLOR_STREAK = 3; // after this many consecutive same-color spawns, the next one is forced to flip
+  const RED_SPAWN_CHANCE = 0.28; // baseline chance a candle spawns already-red instead of green
 
   function candleMaterial(color) {
     return new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.55, roughness: 0.4 });
   }
 
-  function spawnCandle(z, forcedLane) {
+  function spawnCandle(z, forcedLane, forcedColor) {
     const lane = forcedLane !== undefined ? forcedLane : Math.floor(Math.random() * 3);
     const height = (0.6 + Math.random() * 1.6) * WORLD_SCALE;
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(CANDLE_W, height, CANDLE_D), candleMaterial(GREEN));
+
+    // Decide the starting color BEFORE the candle is visible to the
+    // player — some candles are born red (an immediate, visible hazard
+    // the player can choose to avoid from a distance), not just green
+    // ones that flip later. An anti-streak rule guarantees the sequence
+    // can never run all-green or all-red for long: after MAX_COLOR_STREAK
+    // consecutive same-color spawns, the next one is forced to the
+    // opposite color. forcedColor bypasses all of this — used only for
+    // the guaranteed starting platform, which must always be safe.
+    let startColor = forcedColor || (Math.random() < RED_SPAWN_CHANCE ? 'red' : 'green');
+    if (!forcedColor) {
+      const streakLen = recentSpawnColors.length;
+      if (streakLen >= MAX_COLOR_STREAK && recentSpawnColors.slice(-MAX_COLOR_STREAK).every((c) => c === startColor)) {
+        startColor = startColor === 'green' ? 'red' : 'green';
+      }
+      recentSpawnColors.push(startColor);
+      if (recentSpawnColors.length > MAX_COLOR_STREAK) recentSpawnColors.shift();
+    }
+
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(CANDLE_W, height, CANDLE_D), candleMaterial(startColor === 'red' ? RED : GREEN));
     mesh.position.set(LANES[lane], height / 2 - 1.2, z);
     scene.add(mesh);
     // Fuse length depends on the active market event: Pump Waves give
@@ -653,10 +683,12 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     // scroll into range) has already flipped red long before the player
     // could ever land on it, since the fuse itself is only ~2-4.4s. This
     // was a real structural bug: virtually every candle arrived pre-flipped.
+    // Candles born red skip the fuse entirely — they're already in their
+    // final state, nothing left to flip.
     const travelSeconds = Math.abs(z) / Math.max(speed, 0.1);
     const candle = {
-      mesh, lane, height, color: 'green',
-      flipAt: performance.now() + travelSeconds * 1000 + fuseMin + Math.random() * fuseRange,
+      mesh, lane, height, color: startColor,
+      flipAt: startColor === 'red' ? Infinity : performance.now() + travelSeconds * 1000 + fuseMin + Math.random() * fuseRange,
       scored: false,
       warningPlayed: false,
     };
@@ -672,7 +704,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // The player is snapped onto this candle explicitly in
   // apeIntoCoin() rather than relying on the normal landing check
   // to catch a mid-air faller.
-  const startCandle = spawnCandle(0, 1); // lane 1 = LANES[1] = 0, matches player's starting lane
+  const startCandle = spawnCandle(0, 1, 'green'); // lane 1 = LANES[1] = 0, matches player's starting lane — always forced green, must be safe
 
   let cursorZ = -4 * WORLD_SCALE;
   for (let i = 0; i < 24; i++) {
@@ -708,6 +740,12 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
   function apeIntoCoin(coin) {
     if (started) return; // already ape'd in, ignore repeat clicks/enters
+    if ((coin.requiresMastery ?? 0) > trenchesMastery) {
+      coinLabel.textContent = `🔒 Requires Trenches Mastery Lv.${coin.requiresMastery} (currently Lv.${trenchesMastery})`;
+      coinLabel.style.color = '#ff9955';
+      sfx.warning();
+      return;
+    }
     difficulty = coin;
     setLastCoinId(coin.id);
 
@@ -752,6 +790,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     // ever survive intact.
     const now = performance.now();
     candles.forEach((c) => {
+      if (c.color !== 'green') return; // red-born candles have no fuse to refresh
       const travelSeconds = Math.abs(c.mesh.position.z) / Math.max(coin.base, 0.1);
       c.flipAt = now + travelSeconds * 1000 + 1800 + Math.random() * 2600;
     });
@@ -1166,7 +1205,12 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       c.group.position.y = c.baseY + Math.sin(t * 1.4 + c.bobPhase) * 0.08;
       c.group.rotation.y += dt * 0.4;
       const isFocused = coinMeshes.indexOf(c) === focusedCoinIndex || coinMeshes.indexOf(c) === hoveredCoinIndex;
-      c.disc.material.emissiveIntensity = isFocused ? 1.3 : 0.7;
+      if (!c.locked) {
+        // MeshBasicMaterial has no emissive property — brighten the color
+        // multiplier itself for the focus highlight instead.
+        const brightness = isFocused ? 1.25 : 1;
+        c.disc.material.color.setRGB(brightness, brightness, brightness);
+      }
       c.group.scale.setScalar(isFocused ? 1.12 : 1);
     });
 

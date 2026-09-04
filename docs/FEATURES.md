@@ -107,6 +107,22 @@ Last updated: alongside the Trenches step-jump + Bag Value chart additions.
 - A subtle audio tick fires once, only for the candle the player is currently standing on (not every candle in every lane, which would be noisy)
 - Turns rug-flip damage from a "gotcha" into a readable, reactable hazard — same underlying odds, meaningfully fairer *feel*
 
+### Coin art
+- Replaced the flat solid-color placeholder discs with real textured coin art (11 images derived from 5 source designs)
+- Since only 5 unique designs existed for 11 coin slots, most were generated as hue-shifted variants of the originals (measured each source's actual dominant hue numerically first, rather than guessing, since a couple of the images turned out more amber/multicolor than they first appeared) — gives each coin a genuinely distinct look while keeping a coherent shared art style
+- Locked coins (currently just `$LEGEND`) are dimmed via a material color multiply on the same texture, rather than needing a separate grayscale asset per coin
+- Coin geometry switched from a solid cylinder to a flat circle with the texture mapped on — the source art is already a complete circular coin illustration, so a flat plane reads correctly without needing 3D bevel geometry
+
+### Mastery payoff
+- Path mastery previously leveled up in the background with nothing tied to it — a number that went up for no visible reason
+- Now: an 11th coin, **$LEGEND** (the strongest speed/risk profile in the game), sits visibly locked in the coin room — grayed out, padlocked label — until the player reaches Trenches Mastery Lv. 5 via repeated cash-outs
+- Attempting to select it while locked gives clear rejection feedback (message + sound) rather than silently failing or being hidden entirely, so players know exactly what they're working toward
+
+### Candle color variety + anti-streak guarantee
+- Candles can now spawn already-red (~28% chance), not just green candles that flip later — gives the player a genuine, immediately visible choice from a distance, not just a timing puzzle
+- An anti-streak rule guarantees the spawn sequence can never run more than 3 consecutive same-color candles — prevents the degenerate "wall of red" or "wall of green" case entirely
+- The guaranteed starting platform is always forced green regardless of this randomization — it must stay safe, since the player has zero reaction time on the very first frame
+
 ### Fixed: candles arriving pre-flipped (critical)
 - The red-flip timer counted down from **spawn time**, not from when a candle actually became reachable. Since the candle queue spans ~74 units of depth but travel time from spawn to the player (11-18s at typical speeds) was far longer than the flip fuse itself (1.8-4.4s), **virtually every candle had already flipped red long before it was ever landable** — a player could go tens of seconds seeing almost no green candles at all
 - Fixed by adding each candle's estimated travel time (distance ÷ current speed) to its flip timer, so the "green window" now actually starts once the candle is near enough to matter

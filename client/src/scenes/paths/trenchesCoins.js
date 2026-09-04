@@ -20,6 +20,12 @@ export const TRENCHES_COINS = [
   { id: 'fresh',    symbol: '$FRESH',   name: 'Fresh Launch', color: 0xff7766, base: 12.15, ramp: 0.162, cap: 9.45 },
   { id: 'degen',    symbol: '$DEGEN',   name: 'Pure Degen Play', color: 0xff5577, base: 13.5, ramp: 0.18,  cap: 10.5 },
   { id: 'apemax',   symbol: '$APEMAX',  name: 'Maximum Ape', color: 0xff3355, base: 15.0, ramp: 0.2,   cap: 11.5 },
+  // Mastery unlock — invisible/locked until the player has actually earned
+  // it via repeated cash-outs (see requiresMastery, checked against
+  // gameState.state.pathMastery.trenches in TrenchesScene's coin room).
+  // Gives path mastery an actual payoff instead of being a background
+  // number nobody sees the point of.
+  { id: 'legend',   symbol: '$LEGEND',  name: 'Legendary Ape', color: 0xffd700, base: 17.0, ramp: 0.24, cap: 13.5, requiresMastery: 5 },
 ];
 
 const STORAGE_KEY = 'candlerider:trenchesLastCoin';
