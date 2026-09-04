@@ -179,6 +179,50 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     : 'Drag to look around · Click a coin (or ←/→ + Enter) to ape in and start the run';
   root.appendChild(roomHint);
 
+  // ---------- First-time welcome modal ----------
+  // Shown exactly once ever, on a player's genuine first visit to Trenches
+  // — a brand-new player currently gets dropped straight into a free-look
+  // camera and 11 unlabeled-risk coins with nothing but a small persistent
+  // hint. This explains the core concept up front. Returning players never
+  // see this again (gated by isFirstTimeEver / roomActive above).
+  if (isFirstTimeEver) {
+    const welcomeModal = document.createElement('div');
+    welcomeModal.style.cssText = `
+      position:absolute; inset:0; z-index:40; display:flex; align-items:center; justify-content:center;
+      background:rgba(3,3,10,.9); font-family:system-ui,sans-serif; text-align:center; padding:24px; box-sizing:border-box;
+    `;
+    const controlsLine = isTouchDevice
+      ? 'Swipe left/right to change lanes, tap to jump — tap again mid-air to climb higher.'
+      : 'A/D or arrow keys to change lanes, Space or left-click to jump — tap again mid-air to climb higher.';
+    welcomeModal.innerHTML = `
+      <div style="max-width:420px; background:linear-gradient(180deg,#141428,#0a0a18); border:1px solid #3a3a6f; border-radius:14px; padding:28px 26px;">
+        <div style="font-size:22px; font-weight:800; color:#7dffcf; margin-bottom:10px; text-shadow:0 0 14px rgba(125,255,207,.5);">WELCOME TO THE TRENCHES</div>
+        <div style="font-size:13px; color:#c9c9e6; line-height:1.6; margin-bottom:16px; text-align:left;">
+          You're about to jump between scrolling memecoin candles — land on <b style="color:#7dffcf;">green</b> ones to grow your Bag, avoid <b style="color:#ff5577;">red</b> ones or take damage.
+          <br/><br/>
+          First, <b>pick a coin</b> — this sets how fast candles approach. Safer coins (left side, green) are slower and more forgiving; riskier coins (right side, red/pink) are faster with bigger rewards. <b style="color:#7dffcf;">$STABLE or $SAFU</b> are good picks while you learn the timing.
+          <br/><br/>
+          ${controlsLine}
+          <br/><br/>
+          You can <b>cash out anytime</b> to bank what you've earned — but if you fall or run out of health, you lose the whole run's Bag. That's the whole game: how long do you push it?
+        </div>
+        <button id="tr-welcome-dismiss" style="background:#7dffcf; color:#05100c; border:none; padding:12px 28px; border-radius:8px; font-size:14px; font-weight:800; cursor:pointer;">LET'S GO</button>
+      </div>
+    `;
+    root.appendChild(welcomeModal);
+    function dismissWelcome() {
+      localStorage.setItem(HAS_SEEN_ONBOARDING_KEY, '1');
+      roomActive = true;
+      welcomeModal.remove();
+      window.removeEventListener('keydown', onWelcomeKeydown);
+    }
+    function onWelcomeKeydown(e) {
+      if (e.code === 'Enter') dismissWelcome();
+    }
+    welcomeModal.querySelector('#tr-welcome-dismiss').addEventListener('click', dismissWelcome);
+    window.addEventListener('keydown', onWelcomeKeydown);
+  }
+
   const coinLabel = document.createElement('div');
   coinLabel.style.cssText = `
     position:absolute; top:18px; left:50%; transform:translateX(-50%);
@@ -417,7 +461,9 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   let orbitRadius = 9;
   let dragging = false;
   let lastPointer = { x: 0, y: 0 };
-  let roomActive = true; // true until the player apes into a coin
+  const HAS_SEEN_ONBOARDING_KEY = 'candlerider:hasSeenOnboarding';
+  const isFirstTimeEver = !localStorage.getItem(HAS_SEEN_ONBOARDING_KEY);
+  let roomActive = !isFirstTimeEver; // returning players: room is interactive immediately, as before. First-timers: gated behind the welcome modal below.
 
   function updateOrbitCamera() {
     const clampedElev = Math.max(0.15, Math.min(1.3, orbitElevation));
@@ -582,6 +628,9 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     const hits = raycaster.intersectObjects(coinMeshes.map((c) => c.disc));
     hoveredCoinIndex = hits.length ? coinMeshes.findIndex((c) => c.disc === hits[0].object) : -1;
     if (hoveredCoinIndex >= 0) setFocusedCoin(hoveredCoinIndex);
+    // Canvas 2D elements never get a native clickable cursor on their own —
+    // WebGL has no idea a 3D object is "interactive" unless we say so.
+    renderer.domElement.style.cursor = hoveredCoinIndex >= 0 ? 'pointer' : 'default';
   }
 
   function onCoinClick(e) {
@@ -760,6 +809,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     // smoothly carry it from wherever the orbit left it to the normal
     // gameplay framing on its own.
     roomActive = false;
+    renderer.domElement.style.cursor = 'default';
     coinMeshes.forEach((c) => { c.group.visible = false; });
     roomHint.style.display = 'none';
     coinLabel.style.display = 'none';
