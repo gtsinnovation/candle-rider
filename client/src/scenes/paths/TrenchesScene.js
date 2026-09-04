@@ -542,9 +542,14 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
         map: coinTexture,
         color: isLocked ? 0x444455 : 0xffffff, // multiplies with the texture — dims/desaturates locked coins without needing a separate grayscale asset
         transparent: true,
+        side: THREE.DoubleSide, // the player freely orbits the camera around the whole arc, so the coin must be visible from either face regardless of exact angle
       })
     );
-    disc.rotation.x = Math.PI / 2; // stand the coin upright, flat face toward the viewer, instead of lying flat like a hockey puck
+    // No extra rotation needed — CircleGeometry already faces forward by
+    // default, unlike the CylinderGeometry this replaced (which needed a
+    // 90° tip to stand upright). Carrying that old rotation over here was
+    // the actual bug: it pointed the disc's face away from the camera
+    // entirely, leaving only the auto-facing label sprite visible.
     group.add(disc);
 
     const labelMat = new THREE.SpriteMaterial({ map: makeCoinLabelTexture(coin, isLocked), transparent: true });
