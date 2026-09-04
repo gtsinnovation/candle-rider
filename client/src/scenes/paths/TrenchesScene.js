@@ -36,6 +36,15 @@ const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // auto-pause at 10 minutes of inactivit
 export function mountTrenchesScene(container, gameState, onRunEnd) {
   gameState.startRun('trenches');
 
+  // Declared up front since the welcome modal (further down, in the DOM
+  // scaffold section) references this before the orbit-camera setup
+  // (where roomActive conceptually "belongs") ever runs — a duplicate of
+  // the same temporal-dead-zone class of bug fixed earlier for `speed`/
+  // `activeEvent`. Order matters for const/let, unlike function declarations.
+  const HAS_SEEN_ONBOARDING_KEY = 'candlerider:hasSeenOnboarding';
+  const isFirstTimeEver = !localStorage.getItem(HAS_SEEN_ONBOARDING_KEY);
+  let roomActive = !isFirstTimeEver; // returning players: room is interactive immediately, as before. First-timers: gated behind the welcome modal below.
+
   // ---------- DOM scaffold (scene-specific UI only; global HUD covers
   // bag/health/energy/conviction/reputation already) ----------
   const root = document.createElement('div');
@@ -461,9 +470,6 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   let orbitRadius = 9;
   let dragging = false;
   let lastPointer = { x: 0, y: 0 };
-  const HAS_SEEN_ONBOARDING_KEY = 'candlerider:hasSeenOnboarding';
-  const isFirstTimeEver = !localStorage.getItem(HAS_SEEN_ONBOARDING_KEY);
-  let roomActive = !isFirstTimeEver; // returning players: room is interactive immediately, as before. First-timers: gated behind the welcome modal below.
 
   function updateOrbitCamera() {
     const clampedElev = Math.max(0.15, Math.min(1.3, orbitElevation));
