@@ -10,8 +10,8 @@ import { mountHUD } from './ui/HUD.js';
 import { mountInstallPrompt } from './ui/InstallPrompt.js';
 import { mountWarRoom } from './scenes/WarRoomScene.js';
 import { mountTrenchesScene } from './scenes/paths/TrenchesScene.js';
-import { mountAdminDashboard } from './ui/AdminDashboard.js';
 import { eventBus } from './core/EventBus.js';
+import { sfx } from './core/AudioEngine.js';
 
 // Fallback for mobile browsers that don't support the CSS `dvh` unit yet —
 // sets an --app-height custom property from the actual visible viewport
@@ -52,7 +52,8 @@ async function boot() {
     });
 
     eventBus.on('player:levelUp', ({ level }) => {
-      console.log(`[main] Level up! Now level ${level}.`);
+      sfx.levelUp();
+      showLevelUpBanner(container, level);
     });
 
     let teardownScene = null;
@@ -63,6 +64,7 @@ async function boot() {
         const mountScene = PATH_SCENES[pathId];
         if (!mountScene) {
           console.warn(`[main] No scene ported yet for path "${pathId}" -- staying in hub.`);
+          gameState.loseRun('scene-not-implemented'); // undo the startRun() the card click triggered
           return;
         }
         teardownScene?.();
@@ -70,19 +72,7 @@ async function boot() {
       });
     }
 
-    // Hash-based routing: `#admin` mounts the admin dashboard (passphrase
-    // gated), anything else mounts the game hub. The admin dashboard's
-    // "Open Game" button clears the hash, which fires hashchange back here.
-    function showAdmin() {
-      teardownScene?.();
-      teardownScene = mountAdminDashboard(container, () => { location.hash = ''; });
-    }
-    function route() {
-      if (location.hash === '#admin') showAdmin();
-      else showHub();
-    }
-    window.addEventListener('hashchange', route);
-    route();
+    showHub();
 
     // Save on tab close so the last few seconds of state aren't lost to the
     // debounce window.
@@ -96,6 +86,28 @@ async function boot() {
     console.error('[main] boot failed:', err);
     showBootError(container, err);
   }
+}
+
+function showLevelUpBanner(container, level) {
+  const banner = document.createElement('div');
+  banner.style.cssText = `
+    position:absolute; top:22%; left:50%; transform:translate(-50%,-50%) scale(0.85);
+    z-index:100; text-align:center; font-family:system-ui,sans-serif;
+    pointer-events:none; opacity:0; transition:opacity .3s, transform .3s;
+  `;
+  banner.innerHTML = `
+    <div style="font-size:14px; letter-spacing:3px; color:#ffe066; text-shadow:0 0 10px rgba(255,224,102,.6);">LEVEL UP</div>
+    <div style="font-size:44px; font-weight:800; color:#7dffcf; text-shadow:0 0 20px rgba(125,255,207,.7);">LVL ${level}</div>
+  `;
+  container.appendChild(banner);
+  requestAnimationFrame(() => {
+    banner.style.opacity = '1';
+    banner.style.transform = 'translate(-50%,-50%) scale(1)';
+  });
+  setTimeout(() => {
+    banner.style.opacity = '0';
+    setTimeout(() => banner.remove(), 350);
+  }, 2200);
 }
 
 function showBootError(container, err) {

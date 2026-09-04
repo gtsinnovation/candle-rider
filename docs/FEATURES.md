@@ -1,7 +1,7 @@
 # Candle Rider — Technical Features
 
 A running inventory of implemented systems, kept up to date as the project grows.
-Last updated: alongside the admin demo/autopilot mode addition.
+Last updated: alongside the Trenches step-jump + Bag Value chart additions.
 
 ---
 
@@ -14,7 +14,7 @@ Last updated: alongside the admin demo/autopilot mode addition.
 
 ## Core Client Systems
 
-- **EventBus** — pub/sub decoupling `GameState` from UI/scenes; nobody holds direct references to anybody else. `emit` iterates a snapshot of handlers so a handler that unsubscribes mid-emit can't break iteration. Every emitted event (`state:changed`, `run:started`, `run:bagChanged`, `run:lost`, `run:cashout`, `player:levelUp`) has at least one subscriber — no orphaned events
+- **EventBus** — pub/sub decoupling `GameState` from UI/scenes; nobody holds direct references to anybody else
 - **GameState** — run lifecycle (`startRun` / `addBag` / `reportHealth` / `reportEnergy` / `cashOut` / `loseRun`), XP/leveling curve, per-path mastery tracking. Health and Energy reset to full at the start of every run (run-scoped resources, not persistent damage)
 - **SaveManager** — backend-primary persistence with a localStorage mirror fallback; debounced saves (4s) plus an immediate save on cash-out; anonymous UUID player identity with a manual fallback generator for non-secure contexts (e.g. LAN/HTTP testing, where `crypto.randomUUID` is unavailable); falls back to `DEFAULT_PLAYER_STATE` when both the backend and the local mirror are unavailable (first-ever visit + offline)
 - **API client** — fetch wrapper with a hard 5-second timeout on every request, so a hung network call can never silently block app startup
@@ -37,41 +37,18 @@ Last updated: alongside the admin demo/autopilot mode addition.
 
 - Global stats panel: Level, Bag, PNL, Health, Energy, Conviction, Reputation, Conviction Shards
 - Responsive: narrower/more compact on mobile viewports
-- Built once on mount; only the value text nodes update on `state:changed` (which fires every frame during a run) — no per-frame `innerHTML` rebuild, so the HUD stays cheap even while Bag/Energy tick continuously
-- **Event-driven real-time feedback** — subscribes to every game event, not just `state:changed`:
-  - `run:started` → cyan panel flash
-  - `run:bagChanged` → Bag line tints green while gaining, red on a loss (stays green during a green-candle streak, flashes red on a rug)
-  - `run:lost` → red panel flash + "RUN OVER" banner
-  - `run:cashout` → green panel flash + "PNL BANKED" banner with the amount
-  - `player:levelUp` → gold panel flash + "LEVEL UP!" banner
-  - All subscriptions are collected and torn down on HUD unmount
 
 ## Trenches Path (Path 1 — Memecoin & Trenches Degen)
 
 ### Core loop
 - 3-lane candle-jumping endless runner; candles flip green→red on a timer
 - Guaranteed starting platform (fixes an early "instant void-fall" class of bug)
-- The run begins when the player apes into a coin (ape-in), **not** on the War Room card click — so the run clock and the Health/Energy reset happen at the moment gameplay starts, not while browsing the coin room
 - Cash out banks the run's Bag as permanent PNL/Reputation; any loss (rug, void-fall, burnout, liquidation, mid-run exit) forfeits it — the core risk/reward tension
 
 ### Step jump
 - Tapping jump again *while already airborne* applies an additional smaller upward boost, letting the player climb higher mid-jump
 - Capped at 3 total activations per airborne phase (1 launch + 2 step-ups) — resets the instant the player lands, so it can't be used to just fly over the whole mechanic
 - Launch velocity 7.5, step-up boost 5.5, gravity -18
-
-### Responsiveness & feel
-- **Jump buffering** — a jump press made within 120ms of touchdown is buffered and re-fired as a fresh launch the instant the player lands, instead of being eaten. Removes the "I pressed jump a hair too early and nothing happened" frustration that makes runners feel unresponsive. Only engages once the step-up cap is reached, so it never conflicts with the mid-air boost mechanic.
-- **Snappier lane transitions** — the hero lerps to the target lane at `dt * 20` (~75ms to settle), so dodging between candle lanes feels immediate. The banking-lean animation (`dt * 12`) catches up quickly, reading as natural weight shift rather than lag.
-- **Tighter camera follow** — the chase camera lerps at `dt * 8` (up from `dt * 5`), so the view stays connected to the player's lateral movement instead of lagging behind it.
-- **Tab-hidden handling via RAF suspension** — the explicit `visibilitychange` auto-pause was removed (it fired spuriously inside embedded/iframe contexts where `document.hidden` is unreliable, freezing the run mid-play). A hidden tab already suspends `requestAnimationFrame`, and `clock.getDelta()` is capped at 0.05s, so the game freezes naturally while away and resumes cleanly without a time-jump when the tab returns.
-- **WebGL context-loss recovery** — a `webglcontextlost` listener cancels the animation loop and surfaces a reload prompt, so a mobile GPU context drop under memory pressure is a visible, recoverable state rather than a silent dead screen.
-- **GPU memory hygiene** — all candles share a single unit-cube geometry and two shared materials (green/red); height varies via `mesh.scale.y`. The previous per-candle geometry/material allocations were never disposed on despawn, leaking video memory for the whole session. Shared resources are disposed in teardown.
-
-### Combat feedback (hit impact)
-- **Camera shake** — taking a hit (rug flip or red-candle landing) fires a decaying shake impulse that jitters the camera position around its look-at target for ~0.3s, so damage reads as a physical punch rather than just a number ticking down.
-- **Damage vignette** — a red radial-gradient screen-edge overlay flashes on every hit, intensity-scaled (rug flip = 0.5, red landing = 0.3), fading over ~130ms.
-- **Hero red-tint flash** — the hero sprite's `SpriteMaterial.color` washes red on impact and eases back to white over 0.25s, so the character itself visibly reacts to the hit.
-- All three effects share a single `triggerHit(intensity)` call so the impact strength stays consistent across the shake, vignette, and tint.
 
 ### Entry flow (coin room)
 - Split-curtain door animation on entry
@@ -103,12 +80,25 @@ Last updated: alongside the admin demo/autopilot mode addition.
 - Mouse: left-click to jump during gameplay, drag-orbit in the coin room
 - Touch: swipe left/right for lanes, tap to jump, dedicated on-screen Pause/Cash-Out buttons (mobile has no keyboard)
 - Context-aware controls toast — shown once at run start, bottom-left, auto-dismissing; text adapts to touch vs. keyboard/mouse
-- Lane changes register instantly on keydown (the visual lerp follows); jumps are buffered (see Responsiveness & feel) so input never feels lost
 
 ### Debug tooling
 - Live physics readout (lane, grounded state, vertical velocity, speed, current candle color) in the corner — auto-hidden on narrow mobile viewports since it's a dev tool, not player-facing
 
-## Mobile / PWA
+### Audio
+- Synthesized sound effects via the Web Audio API (`core/AudioEngine.js`) — no external audio files. Lazily creates the `AudioContext` on first real user interaction, respecting browser autoplay policy automatically
+- Effects: jump (launch + step-up boosts), landing (green/red distinct tones), rug-flip damage, cash-out fanfare, loss sting, level-up chime, streak ping, pause/resume cue
+
+### Streak feedback
+- Consecutive green landings tracked and now **displayed** (previously tracked but invisible) — escalating size/color the longer the streak runs, resets on any red landing or rug-flip damage
+- Combo popup text includes streak count once above 1 (e.g. "+$15 LANDED (x3 STREAK!)")
+
+### Level-up celebration
+- `player:levelUp` previously only logged to console — now shows a real on-screen banner (global, works regardless of active scene) plus a chime, so leveling up is an actual visible moment instead of invisible background state
+
+### Fixed: candle memory leak
+- Candle geometry/material were never disposed on despawn — every spawn/despawn cycle over a long session leaked GPU resources. Now disposed both on despawn and on scene teardown (for any candles still active when a run ends)
+
+
 
 - `manifest.json` + service worker (cache-first for the app shell, network-only for `/api` — save data must never be served stale)
 - Service worker registers in production builds only (skipped in dev to avoid fighting Vite's hot-reload)
@@ -124,13 +114,6 @@ Last updated: alongside the admin demo/autopilot mode addition.
 - Vite dev server LAN-accessible (`host: true`) for real-device testing over the local network
 
 ---
-
-## Demo / Autopilot mode (admin-only)
-
-- **Admin dashboard** at the hidden `#admin` route, passphrase-gated (`degen-admin`, change in `AdminDashboard.js`) so regular players can't reach it. Hosts the Demo Play toggle.
-- **Demo Play toggle** — when on, the Trenches path runs an autopilot hands-free: it apes into a coin, rides each candle until near-despawn then jumps to the next arriving candle (picking the safest lane each frame), cashes out at a target bag ($200) or time limit (42s), then auto-retries — looping for hands-off teaser/cast footage pre-launch.
-- The flag persists in `localStorage` (`cd_demo_mode`) so it survives reloads; the live in-memory value updates immediately on toggle, no reload needed.
-- Auth is client-side only (passphrase + sessionStorage) — it keeps the panel off the normal player path, not real security.
 
 ## Known limitations / honest caveats
 

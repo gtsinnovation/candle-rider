@@ -5,7 +5,6 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true, // binds 0.0.0.0 instead of just localhost — lets other devices on the same LAN (e.g. a phone) reach the dev server
-    allowedHosts: true, // accept the preview's external hostname (Base44 dev environment)
     proxy: {
       // In local dev, the Vite dev server proxies API calls to the native
       // Node server running on 3001, so the client can always call

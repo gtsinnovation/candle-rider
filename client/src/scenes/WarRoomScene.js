@@ -8,7 +8,7 @@
 // Systematic) are ported in from the standalone Three.js prototypes — this
 // file only owns navigation, not gameplay.
 
-import { PATHS, heroArtUrl, bossArtUrl } from '@candle-rider/shared';
+import { PATHS, heroArtUrl } from '@candle-rider/shared';
 import { eventBus } from '../core/EventBus.js';
 
 let stylesInjected = false;
@@ -17,11 +17,6 @@ function injectResponsiveStyles() {
   stylesInjected = true;
   const style = document.createElement('style');
   style.textContent = `
-    @keyframes heroIdle {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-6px); }
-    }
-    .hero-card-art { animation: heroIdle 3s ease-in-out infinite; }
     @media (max-width: 768px) {
       #war-room {
         flex-wrap: nowrap !important;
@@ -44,7 +39,7 @@ export function mountWarRoom(container, gameState, onSelectPath) {
   el.style.cssText = `
     position: absolute; inset: 0; display: flex; gap: 12px;
     align-items: center; justify-content: center; flex-wrap: wrap;
-    padding: 40px 40px 40px 300px; box-sizing: border-box;
+    padding: 40px 300px 40px 40px; box-sizing: border-box;
     font-family: system-ui, sans-serif;
   `;
   container.appendChild(el);
@@ -66,27 +61,21 @@ export function mountWarRoom(container, gameState, onSelectPath) {
         cursor: ${unlocked ? 'pointer' : 'not-allowed'};
       `;
       card.innerHTML = `
-        <img src="${heroArtUrl(path.id)}" alt="${path.name}" class="hero-card-art"
-          style="width:100%; height:auto; display:block; ${unlocked ? '' : 'filter:grayscale(1);'}" />
+        <img src="${heroArtUrl(path.id)}" alt="${path.name}"
+          style="width:100%; height:200px; object-fit:cover; ${unlocked ? '' : 'filter:grayscale(1);'}" />
         <div style="padding:12px 14px;">
           <div style="font-size:13px;font-weight:700;margin-bottom:2px;">${path.name}</div>
           <div style="font-size:10px;color:#9a9ac0;margin-bottom:6px;">${path.theme}</div>
           <div style="font-size:11px;color:#9a9ac0;margin-bottom:10px;">${path.genre}</div>
-          <div style="font-size:11px;margin-bottom:8px;">Mastery Lv. ${mastery}</div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <img src="${bossArtUrl(path.id)}" alt="${path.boss.name}"
-              style="width:48px;height:48px;object-fit:cover;border-radius:6px;${unlocked ? '' : 'filter:grayscale(1);'}" />
-            <div>
-              <div style="font-size:9px;color:#7d7da0;text-transform:uppercase;letter-spacing:.5px;">Nemesis</div>
-              <div style="font-size:10px;color:#eef0ff;font-weight:600;">${path.boss.name}</div>
-            </div>
-          </div>
+          <div style="font-size:11px;margin-bottom:4px;">Mastery Lv. ${mastery}</div>
+          <div style="font-size:10px;color:#7d7da0;">Boss: ${path.boss.name}</div>
         </div>
       `;
 
       if (unlocked) {
         card.addEventListener('click', () => {
-          onSelectPath(path.id); // the scene starts the run itself at ape-in
+          gameState.startRun(path.id);
+          onSelectPath(path.id);
         });
       }
 

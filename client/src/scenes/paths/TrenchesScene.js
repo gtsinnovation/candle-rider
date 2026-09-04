@@ -18,7 +18,7 @@
 import * as THREE from 'three';
 import { eventBus } from '../../core/EventBus.js';
 import { TRENCHES_COINS, getLastCoinId, setLastCoinId, getCoinById } from './trenchesCoins.js';
-import { isDemoMode } from '../../core/demoMode.js';
+import { sfx } from '../../core/AudioEngine.js';
 
 // World scale: candle blocks, lane spacing, and everything spatial except
 // the hero were reduced 25% (0.75x) — the hero's own size (HERO_HEIGHT
@@ -34,9 +34,7 @@ const IDLE_WARNING_MS = 9 * 60 * 1000;  // show a warning at 9 minutes of inacti
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // auto-pause at 10 minutes of inactivity
 
 export function mountTrenchesScene(container, gameState, onRunEnd) {
-  // The run starts when the player apes into a coin (apeIntoCoin), not on
-  // card click — so the run clock and resource resets begin at the moment
-  // gameplay actually begins, not while browsing the coin room.
+  gameState.startRun('trenches');
 
   // ---------- DOM scaffold (scene-specific UI only; global HUD covers
   // bag/health/energy/conviction/reputation already) ----------
@@ -60,6 +58,33 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   `;
   root.appendChild(laneIndicator);
 
+  const streakDisplay = document.createElement('div');
+  streakDisplay.style.cssText = `
+    position:absolute; bottom:56px; left:50%; transform:translateX(-50%);
+    font-family:system-ui,sans-serif; font-weight:800; z-index:5;
+    opacity:0; transition:opacity .25s, transform .25s; pointer-events:none;
+    text-shadow:0 0 12px currentColor;
+  `;
+  root.appendChild(streakDisplay);
+  function updateStreakDisplay() {
+    if (streak <= 1) {
+      streakDisplay.style.opacity = '0';
+      return;
+    }
+    // escalating size/color the longer the streak runs — a small, cheap
+    // way to make a long streak feel increasingly exciting rather than
+    // just being a static number.
+    const size = Math.min(28, 15 + streak * 1.3);
+    const color = streak >= 8 ? '#ff9955' : streak >= 4 ? '#ffe066' : '#7dffcf';
+    streakDisplay.style.fontSize = `${size}px`;
+    streakDisplay.style.color = color;
+    streakDisplay.textContent = `🔥 x${streak} STREAK`;
+    streakDisplay.style.opacity = '1';
+    streakDisplay.style.transform = 'translateX(-50%) scale(1.15)';
+    clearTimeout(updateStreakDisplay._t);
+    updateStreakDisplay._t = setTimeout(() => (streakDisplay.style.transform = 'translateX(-50%) scale(1)'), 150);
+  }
+
   const style = document.createElement('style');
   style.textContent = `
     .lane-dot { width:34px; height:6px; border-radius:3px; background:#24243f; border:1px solid #3a3a5f; }
@@ -75,18 +100,6 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     font-family: system-ui, sans-serif;
   `;
   root.appendChild(combo);
-
-  // Damage vignette — a red radial-gradient overlay that flashes the screen
-  // edges when the player takes a hit (rug flip / red-candle landing), so
-  // damage reads as a visceral screen-space punch on top of the HUD number
-  // change and combo text.
-  const damageVignette = document.createElement('div');
-  damageVignette.style.cssText = `
-    position:absolute; inset:0; z-index:8; pointer-events:none;
-    background: radial-gradient(ellipse at center, transparent 35%, rgba(255,40,60,0.6) 100%);
-    opacity:0; transition:opacity .1s ease-out;
-  `;
-  root.appendChild(damageVignette);
 
   const hint = document.createElement('div');
   hint.style.cssText = `
@@ -335,18 +348,6 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
   drawChart(); // initial flat line at $0 before the run properly gets moving
 
-  // Combat hit feedback — fires a camera shake impulse, a red screen-edge
-  // vignette flash, and a brief hero red-tint, so taking damage feels like a
-  // punch rather than just a number ticking down. `intensity` scales all
-  // three (rug flip = 0.5, red-candle landing = 0.3).
-  function triggerHit(intensity) {
-    shakeAmount = Math.max(shakeAmount, intensity);
-    hitFlashTimer = Math.max(hitFlashTimer, 0.25);
-    damageVignette.style.opacity = String(Math.min(0.9, intensity * 1.4));
-    clearTimeout(triggerHit._t);
-    triggerHit._t = setTimeout(() => { damageVignette.style.opacity = '0'; }, 130);
-  }
-
   function popCombo(text, color) {
     combo.textContent = text;
     combo.style.color = color || '#ffd166';
@@ -575,11 +576,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // scene instead of showing as a black rectangle. Sprites always face
   // the camera automatically, which suits an endless-runner viewed from
   // a mostly-fixed chase angle.
-  const heroTexture = new THREE.TextureLoader().load(
-    '/assets/heroes/trenches-back-cutout.png',
-    undefined, undefined,
-    (err) => console.error('[trenches] hero texture failed to load:', err?.message || err)
-  );
+  const heroTexture = new THREE.TextureLoader().load('/assets/heroes/trenches-back-cutout.png');
   const heroMat = new THREE.SpriteMaterial({ map: heroTexture, transparent: true });
   const heroSprite = new THREE.Sprite(heroMat);
   const HERO_HEIGHT = 2.1;
@@ -598,21 +595,14 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   const GREEN = 0x00ff77;
   const RED = 0xff3355;
 
-  // Shared geometry + two shared materials for ALL candles. Candles spawn
-  // and despawn continuously throughout a run, so per-candle geometry/
-  // material allocations would leak GPU memory for the whole session (the
-  // old code removed the mesh on despawn but never disposed its geometry/
-  // material). Height varies per candle via mesh.scale.y instead of a
-  // per-candle BoxGeometry, so a single shared unit cube suffices.
-  const candleGeo = new THREE.BoxGeometry(1, 1, 1);
-  const greenMat = new THREE.MeshStandardMaterial({ color: GREEN, emissive: GREEN, emissiveIntensity: 0.55, roughness: 0.4 });
-  const redMat = new THREE.MeshStandardMaterial({ color: RED, emissive: RED, emissiveIntensity: 0.55, roughness: 0.4 });
+  function candleMaterial(color) {
+    return new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.55, roughness: 0.4 });
+  }
 
   function spawnCandle(z, forcedLane) {
     const lane = forcedLane !== undefined ? forcedLane : Math.floor(Math.random() * 3);
     const height = (0.6 + Math.random() * 1.6) * WORLD_SCALE;
-    const mesh = new THREE.Mesh(candleGeo, greenMat);
-    mesh.scale.set(CANDLE_W, height, CANDLE_D);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(CANDLE_W, height, CANDLE_D), candleMaterial(GREEN));
     mesh.position.set(LANES[lane], height / 2 - 1.2, z);
     scene.add(mesh);
     const candle = {
@@ -659,15 +649,11 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   let difficulty = getCoinById(getLastCoinId());
   let animId = null;
   let landSquashTimer = 0; // counts down after landing, drives the squash/rebound animation
-  let jumpBufferTimer = 0; // counts down; a jump press made just before landing is buffered and re-fired on touchdown
-  let shakeAmount = 0;     // camera shake impulse, decays each frame — set on combat hits
-  let hitFlashTimer = 0;   // counts down after a hit, drives the hero red-tint flash
   let lastInputTime = performance.now();
   let idleWarningShown = false;
 
   function apeIntoCoin(coin) {
     if (started) return; // already ape'd in, ignore repeat clicks/enters
-    gameState.startRun('trenches'); // run begins here, not on the card click
     difficulty = coin;
     setLastCoinId(coin.id);
 
@@ -719,6 +705,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   function pauseGame(reason) {
     if (!started || ended || paused) return;
     paused = true;
+    sfx.pause();
     pauseOverlay.querySelector('#tr-pause-title').textContent = reason ? 'AUTO-PAUSED' : 'PAUSED';
     pauseOverlay.querySelector('#tr-pause-reason').textContent = reason || 'Take your time — your run is safely frozen.';
     pauseOverlay.style.display = 'flex';
@@ -726,6 +713,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   function resumeGame() {
     if (!paused) return;
     paused = false;
+    sfx.pause();
     idleWarningShown = false;
     lastInputTime = performance.now();
     pauseOverlay.style.display = 'none';
@@ -768,7 +756,6 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   const MAX_JUMP_TAPS = 3;   // 1 launch + up to 2 step-up boosts per airborne phase
   const JUMP_LAUNCH_VEL = 7.5; // unchanged from the original tuned jump
   const JUMP_BOOST_VEL = 5.5;  // smaller "step up" kick for each extra tap while airborne
-  const JUMP_BUFFER_WINDOW = 0.12; // seconds — a jump press within this long before landing is buffered
 
   function tryJump() {
     if (!jumping) {
@@ -776,7 +763,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       jumping = true;
       jumpChainCount = 1;
       velY = JUMP_LAUNCH_VEL;
-      jumpBufferTimer = 0;
+      sfx.jump();
       return;
     }
     // Already airborne — each additional tap gives one more incremental
@@ -785,13 +772,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     // below), so it's per-jump, not a global resource.
     if (jumpChainCount < MAX_JUMP_TAPS) {
       jumpChainCount++;
-      velY = Math.max(velY + JUMP_BOOST_VEL, JUMP_BOOST_VEL);
-    } else {
-      // At the step-up cap — buffer the press so that if the player lands
-      // within the buffer window, a fresh launch fires immediately on
-      // touchdown. This removes the "I pressed jump a hair too early and
-      // nothing happened" frustration that makes runners feel unresponsive.
-      jumpBufferTimer = JUMP_BUFFER_WINDOW;
+      velY = JUMP_BOOST_VEL;
+      sfx.jump();
     }
   }
 
@@ -856,119 +838,15 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   function cashOut() {
     if (ended) return;
     const result = gameState.cashOut();
+    sfx.cashOut();
     showOverlay('CASHED OUT', `Banked $${result.pnlEarned.toLocaleString()} PNL and ${result.reputationEarned} Reputation.`, '#7dffcf');
   }
 
   function lose(title, reason) {
     if (ended) return;
     gameState.loseRun(reason);
+    sfx.loss();
     showOverlay(title, reason, '#ff5577');
-  }
-
-  // ---------- Demo / autopilot mode (admin-controlled) ----------
-  // When the admin dashboard flips demo mode on, an autopilot drives the
-  // whole run hands-free: apes into a coin, picks the safest lane each
-  // frame (nearest green candle not about to flip), jumps to bridge gaps /
-  // escape rugs, cashes out at a target bag (or time limit), then
-  // auto-retries — looping for teaser/cast footage. Driven from animate()
-  // so it runs in every phase (coin room, play, ended), not just update().
-  const DEMO_BAG_TARGET = 200;
-  const DEMO_MAX_RUN_SEC = 42;
-  let demoApeInDelay = 0;
-  let demoEndedDelay = 0;
-  let demoRetryQueued = false;
-
-  // Score each lane by its best candle near the landing zone: green candles
-  // close to z=0 that aren't about to flip rank highest.
-  // Pick the safest lane to be in. Only candles that are arriving or at
-  // the landing zone (z <= 1.2) count — a candle past that is leaving and
-  // will despawn before it can be ridden. `avoidLane` penalizes the lane
-  // we're trying to leave so the autopilot switches away from a bad candle
-  // rather than jumping straight back onto it.
-  // Pick the safest lane to be in. Only candles at or before the landing
-  // zone (z <= 1.2) count; a candle past that is leaving and will despawn
-  // before it can be ridden. Fresh candles still near z=0 score highest —
-  // the autopilot slides sideways onto them instead of jumping into gaps.
-  // `avoidLane` penalizes the lane we're leaving so we switch away from a
-  // bad candle rather than re-selecting it.
-  // Pick the lane with the best candle to escape to. Only candles that are
-  // arriving or at center (z <= 0.5) count — a candle past that is leaving
-  // and will despawn before it can be ridden. The filter reaches back to
-  // z=-5 so it includes candles that arrive at the landing zone during a
-  // jump's ~0.83s airtime (~speed*0.83 ≈ 3 units of travel). `avoidLane`
-  // lightly penalizes the lane we're leaving so we prefer a fresh lane.
-  function bestEscapeLane(now, avoidLane) {
-    const laneBest = [-Infinity, -Infinity, -Infinity];
-    for (const c of candles) {
-      const z = c.mesh.position.z;
-      if (z < -5 || z > 0.5) continue;
-      const flippingSoon = c.color === 'green' && (c.flipAt - now) < 1000;
-      const green = c.color === 'green' && !flippingSoon;
-      let score = (green ? 100 : (c.color === 'green' ? 45 : 8)) - Math.abs(z) * 5;
-      if (c.lane === avoidLane) score -= 25;
-      if (score > laneBest[c.lane]) laneBest[c.lane] = score;
-    }
-    let targetLane = laneIndex, top = -Infinity;
-    for (let l = 0; l < 3; l++) {
-      if (laneBest[l] > top) { top = laneBest[l]; targetLane = l; }
-    }
-    return targetLane;
-  }
-
-  function demoAutopilot() {
-    const now = performance.now();
-    if (onCandle) {
-      const cz = onCandle.mesh.position.z;
-      // Ride the current candle until it's near despawn, then jump to the
-      // next arriving candle. One jump per candle keeps the autopilot
-      // stable — jumping for red/flips causes chaos, and the flip damage is
-      // already done by the time we'd react anyway.
-      if (cz > DESPAWN_Z * 0.25 && !jumping) {
-        const target = bestEscapeLane(now, laneIndex);
-        if (target !== laneIndex) laneIndex = target;
-        tryJump();
-      }
-    } else {
-      // Airborne — steer toward the best landing lane, and step-jump to
-      // extend airtime only when there's no candle at all under us (landing
-      // on red is survivable, so don't waste a step-jump then).
-      const target = bestEscapeLane(now, -1);
-      if (target !== laneIndex) laneIndex = target;
-      if (velY < 0) {
-        const hasLanding = candles.some((c) => c.lane === laneIndex && Math.abs(c.mesh.position.z) < 2.0);
-        if (!hasLanding && jumpChainCount < MAX_JUMP_TAPS) tryJump();
-      }
-    }
-  }
-
-  function demoTick(dt) {
-    if (!isDemoMode()) return;
-    // Coin room → ape in after a beat so the door animation reads
-    if (roomActive && !started) {
-      demoApeInDelay += dt;
-      if (demoApeInDelay > 1.1) apeIntoCoin(TRENCHES_COINS[focusedCoinIndex]);
-      return;
-    }
-    // Playing → autopilot + cash out at target/time
-    if (started && !ended && !paused) {
-      demoAutopilot();
-      const bag = gameState.currentRun ? gameState.currentRun.bag : 0;
-      if (bag >= DEMO_BAG_TARGET || elapsed > DEMO_MAX_RUN_SEC) cashOut();
-      return;
-    }
-    // Ended → auto-retry after a pause so the result overlay is visible
-    if (ended && !demoRetryQueued) {
-      demoEndedDelay += dt;
-      if (demoEndedDelay > 2.2) {
-        demoRetryQueued = true;
-        // Defer to after this frame so teardown (triggered by the retry
-        // click) doesn't run mid-render.
-        setTimeout(() => {
-          const btn = overlay.querySelector('#tr-retry-btn');
-          if (btn && isDemoMode()) btn.click();
-        }, 0);
-      }
-    }
   }
 
   overlay.querySelector('#tr-retry-btn').addEventListener('click', () => {
@@ -1021,11 +899,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     groundTexture.offset.y -= (speed * dt) / GROUND_CELL_SIZE;
 
     const targetX = LANES[laneIndex];
-    player.position.x += (targetX - player.position.x) * Math.min(1, dt * 15); // smoother lane transitions (~110ms) — eased slide between lanes
+    player.position.x += (targetX - player.position.x) * Math.min(1, dt * 12);
     updateLaneDots();
-
-    // Tick down the jump buffer; consumed on landing below.
-    if (jumpBufferTimer > 0) jumpBufferTimer = Math.max(0, jumpBufferTimer - dt);
 
     velY += GRAVITY * dt;
     player.position.y += velY * dt;
@@ -1035,29 +910,17 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       const c = candles[i];
       c.mesh.position.z += speed * dt;
 
-      if (performance.now() > c.flipAt) {
+      if (c.color === 'green' && performance.now() > c.flipAt) {
+        c.color = 'red';
+        c.mesh.material.color.setHex(RED);
+        c.mesh.material.emissive.setHex(RED);
         if (onCandle === c) {
-          // The player is riding this candle — don't flip its color out from
-          // under them. Reschedule the trend change for after they leave.
-          c.flipAt = performance.now() + 1800 + Math.random() * 2600;
-        } else if (c.color === 'green') {
-          c.color = 'red';
-          c.mesh.material = redMat; // swap to the shared red material (no per-candle alloc)
-          if (onCandle === c) {
-            gameState.reportHealth(Math.max(0, gameState.state.health - 14));
-            popCombo('RUG FLIP! -14 HP', '#ff5577');
-            triggerHit(0.5);
-          }
-        } else {
-          // Trend reversal — a red candle flips back to green, so trends
-          // aren't one-way: riding out a red candle can recover into a
-          // green one and start accruing Bag again.
-          c.color = 'green';
-          c.mesh.material = greenMat;
-          if (onCandle === c) popCombo('TREND REVERSAL', '#7dffcf');
+          gameState.reportHealth(Math.max(0, gameState.state.health - 14));
+          sfx.damage();
+          streak = 0;
+          updateStreakDisplay();
+          popCombo('RUG FLIP! -14 HP', '#ff5577');
         }
-        // schedule the next trend flip in either direction
-        c.flipAt = performance.now() + 1800 + Math.random() * 2600;
       }
 
       if (c.mesh.position.z > DESPAWN_Z) {
@@ -1065,6 +928,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
           lose('RUGPULLED', 'The candle vanished under you.');
         }
         scene.remove(c.mesh);
+        c.mesh.geometry.dispose();
+        c.mesh.material.dispose();
         candles.splice(i, 1);
         continue;
       }
@@ -1097,30 +962,22 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
         jumpChainCount = 0;
         onCandle = c;
 
-        // Buffered jump: if the player pressed jump within the buffer window
-        // before touchdown, fire a fresh launch immediately instead of
-        // eating the input — keeps the bounce rhythm feeling tight.
-        if (jumpBufferTimer > 0) {
-          jumping = true;
-          jumpChainCount = 1;
-          velY = JUMP_LAUNCH_VEL;
-          jumpBufferTimer = 0;
-          landSquashTimer = 0; // skipping the squash — going straight back up
-        }
-
         if (!c.scored) {
           c.scored = true;
           if (c.color === 'green') {
             const gain = 8 + Math.floor(Math.random() * 10);
             gameState.addBag(gain);
             streak += 1;
-            popCombo('+$' + gain + ' LANDED', '#7dffcf');
+            sfx.landGreen();
+            if (streak > 1) sfx.streak(streak);
+            popCombo(streak > 1 ? `+$${gain} LANDED (x${streak} STREAK!)` : `+$${gain} LANDED`, '#7dffcf');
           } else {
             gameState.addBag(-6);
             streak = 0;
+            sfx.landRed();
             popCombo('LANDED ON RED', '#ff9955');
-            triggerHit(0.3);
           }
+          updateStreakDisplay();
         }
         break;
       }
@@ -1143,18 +1000,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     }
 
     const camTarget = new THREE.Vector3(player.position.x * 0.6, player.position.y + 3.4 * WORLD_SCALE, player.position.z + 7.5 * WORLD_SCALE);
-    camera.position.lerp(camTarget, Math.min(1, dt * 8)); // tighter camera follow so the view feels connected to movement
+    camera.position.lerp(camTarget, Math.min(1, dt * 5));
     camera.lookAt(player.position.x * 0.6, player.position.y + 0.6, player.position.z - 4);
-
-    // Camera shake on combat hits — jitter the camera position around the
-    // look-at target, decaying over ~0.3s. Applied after lookAt so the
-    // aim point stays steady while the viewpoint punches.
-    if (shakeAmount > 0) {
-      shakeAmount = Math.max(0, shakeAmount - dt * 1.7);
-      const s = shakeAmount * 0.35;
-      camera.position.x += (Math.random() - 0.5) * s;
-      camera.position.y += (Math.random() - 0.5) * s;
-    }
     // ---------- Procedural sprite animation ("juice") ----------
     // Sprites always billboard to face the camera and ignore the parent
     // Group's rotation.y, so a plain rotation-based lean (what was here
@@ -1191,23 +1038,11 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       heroSprite.position.y = HERO_HEIGHT / 2 + Math.abs(bob) * 0.4;
     }
 
-    // Hero hit flash — tint the sprite red on a combat hit, easing back to
-    // white as the hitFlashTimer runs out. SpriteMaterial.color multiplies
-    // the texture, so this reads as a red wash over the hero art.
-    if (hitFlashTimer > 0) {
-      hitFlashTimer = Math.max(0, hitFlashTimer - dt);
-      const f = hitFlashTimer / 0.25; // 1 at impact → 0 as it fades
-      heroMat.color.setRGB(1, 1 - 0.7 * f, 1 - 0.7 * f);
-    } else {
-      heroMat.color.setRGB(1, 1, 1);
-    }
-
     // Bank/lean into lane changes — SpriteMaterial.rotation is an in-plane
     // (view-axis) roll, the one rotation a billboard sprite actually
-    // respects. Tightened (dt * 12) so the lean catches up to the snappier
-    // lane transitions instead of lagging behind them.
+    // respects.
     const leanTarget = (targetX - player.position.x) * -0.35;
-    heroMat.rotation += (leanTarget - heroMat.rotation) * Math.min(1, dt * 12);
+    heroMat.rotation += (leanTarget - heroMat.rotation) * Math.min(1, dt * 8);
 
     debugBox.textContent =
       `lane: ${laneIndex}  grounded: ${!jumping}\n` +
@@ -1232,30 +1067,9 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     });
 
     if (started && !ended && !paused) update(dt);
-    demoTick(dt); // admin autopilot — no-op unless demo mode is on
     renderer.render(scene, camera);
   }
   animate();
-
-  // ---------- Robustness: recover on context loss
-  // Note: an explicit `visibilitychange` auto-pause was removed — in the
-  // preview iframe (and some embedded contexts) `document.hidden` is
-  // unreliable and fired spuriously, freezing the run mid-play. A hidden
-  // tab already suspends `requestAnimationFrame`, and `clock.getDelta()`
-  // is capped at 0.05s, so the game naturally freezes while the tab is
-  // away and resumes cleanly when it returns — no explicit pause needed.
-  function onContextLost(e) {
-    e.preventDefault();
-    cancelAnimationFrame(animId);
-    if (started && !ended) {
-      ended = true;
-      overlay.querySelector('#tr-overlay-title').textContent = 'GRAPHICS CONTEXT LOST';
-      overlay.querySelector('#tr-overlay-title').style.color = '#ff6688';
-      overlay.querySelector('#tr-overlay-reason').textContent = 'The graphics context was lost (common on mobile under memory pressure). Reload the page to resume.';
-      overlay.style.display = 'flex';
-    }
-  }
-  renderer.domElement.addEventListener('webglcontextlost', onContextLost);
 
   // ---------- TEARDOWN ----------
   function teardown() {
@@ -1265,7 +1079,6 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     window.removeEventListener('resize', resize);
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerUp);
-    renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
     renderer.domElement.removeEventListener('pointerdown', onPointerDown);
     renderer.domElement.removeEventListener('wheel', onWheel);
     renderer.domElement.removeEventListener('click', onCoinClick);
@@ -1280,12 +1093,13 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
         if (child.material) child.material.dispose();
       });
     });
+    candles.forEach((c) => {
+      c.mesh.geometry.dispose();
+      c.mesh.material.dispose();
+    });
     groundTexture.dispose();
     groundMat.dispose();
     groundMesh.geometry.dispose();
-    candleGeo.dispose();
-    greenMat.dispose();
-    redMat.dispose();
     heroTexture.dispose();
     heroMat.dispose();
     renderer.dispose();
