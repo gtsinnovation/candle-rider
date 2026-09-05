@@ -109,9 +109,9 @@ Last updated: alongside the Trenches step-jump + Bag Value chart additions.
 
 ### Entry gate ("Enter the Trenches")
 - Door hue recolored to match the game's key art (deep black with vivid green energy accents), replacing the earlier navy/purple palette
-- Doors now stay closed for **every** player — first-time or returning — until a glowing, pulsing "ENTER THE TRENCHES" button is clicked, rather than opening automatically on mount for returning players
-- Reveal transition slowed (1.3s → 2.2s) for a more deliberate curtain-opening moment
-- First-time players see the welcome modal *after* clicking the gate (not before); returning players skip straight to the door reveal
+- The gate (closed doors + glowing "ENTER THE TRENCHES" button) now shows **once per browser session** (tracked via `sessionStorage`, resets on a fresh tab/reload) — not on every retry or hub-navigation within the same session, which would have gotten old fast. Repeat entries within a session skip straight to an already-open room
+- The onboarding modal remains **once ever** (tracked separately via `localStorage`) and only ever appears attached to that first-ever gate click — a returning player in a brand-new session sees the gate again, but never the tutorial modal a second time
+- Reveal transition slowed (1.3s → 2.2s) for a more deliberate curtain-opening moment on that first pass
 
 ### New-player onboarding
 - A brand-new player was previously dropped straight into free-look camera controls and 11 unlabeled-risk coins with no guidance beyond a small persistent hint
