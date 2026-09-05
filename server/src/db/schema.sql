@@ -2,30 +2,26 @@
 -- SQLite is the source of truth for Candle Rider saves. Applied once at
 -- server boot (see db/client.js) — safe to run repeatedly (IF NOT EXISTS).
 --
+-- NOTE: foreign_keys is enabled at runtime in db/client.js (PRAGMA
+-- foreign_keys = ON), so the ON DELETE CASCADE on run_results below is
+-- actually enforced. SQLite does not persist this pragma in the file.
+--
 -- AUTH PLAN (not yet implemented): identity is currently just a
 -- client-generated UUID stored in the browser, no login required. google_id
 -- and email below are nullable placeholders anticipating a future
--- "Sign in with Google" option for usage tracking across devices — a
--- signed-in player's anonymous UUID would be linked to their google_id
--- (merging any existing anonymous save), rather than replacing the id
--- scheme entirely. Not built yet: needs real Google OAuth credentials and
--- a /api/auth/google callback route, out of scope until requested.
+-- "Sign in with Google" option. save_token is a server-issued secret that
+-- authorizes writes for a player (anti-hijack); see routes/save.js.
 
 CREATE TABLE IF NOT EXISTS players (
   id            TEXT PRIMARY KEY,        -- client-generated UUID, no login/wallet
   display_name  TEXT NOT NULL DEFAULT 'Degen',
   google_id     TEXT,                    -- nullable; set once Google sign-in is implemented
   email         TEXT,                    -- nullable; from Google profile once linked
+  save_token    TEXT,                    -- server-issued secret; required header x-save-token to write saves
   state_json    TEXT NOT NULL,           -- full PlayerState blob, see shared/economy.js
   created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
-
--- NOTE: the google_id/email columns above only apply to a BRAND NEW
--- database file. CREATE TABLE IF NOT EXISTS is a no-op against an existing
--- players table from before these columns were added — that migration
--- (ALTER TABLE ADD COLUMN + the unique index) happens programmatically in
--- db/client.js instead, since SQLite has no "ADD COLUMN IF NOT EXISTS".
 
 CREATE TABLE IF NOT EXISTS run_results (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -4,7 +4,8 @@
 // native Node server) is the source of truth; localStorage is a fast local
 // mirror so the game can boot instantly offline and isn't blocked on a
 // network round-trip. No wallet, no login — identity is just a
-// client-generated UUID stored in localStorage.
+// client-generated UUID stored in localStorage. A server-issued save token
+// (returned from the first save) authorizes subsequent writes.
 
 import { api } from '../api/client.js';
 import { eventBus } from './EventBus.js';
@@ -12,6 +13,7 @@ import { DEFAULT_PLAYER_STATE } from '@candle-rider/shared';
 
 const PLAYER_ID_KEY = 'candlerider:playerId';
 const STATE_MIRROR_KEY = 'candlerider:stateMirror';
+const SAVE_TOKEN_KEY = 'candlerider:saveToken';
 const SAVE_DEBOUNCE_MS = 4000;
 
 function generateUUID() {
@@ -41,6 +43,19 @@ function getOrCreatePlayerId() {
   return id;
 }
 
+function getSaveToken() {
+  return localStorage.getItem(SAVE_TOKEN_KEY);
+}
+
+function setSaveToken(token) {
+  if (!token) return;
+  try {
+    localStorage.setItem(SAVE_TOKEN_KEY, token);
+  } catch (err) {
+    console.warn('[SaveManager] failed to persist save token:', err.message);
+  }
+}
+
 export class SaveManager {
   constructor(gameState) {
     this.gameState = gameState;
@@ -56,10 +71,7 @@ export class SaveManager {
   // Loads from backend first (source of truth); falls back to the
   // localStorage mirror if the network is unavailable so the game still
   // boots offline; falls back to DEFAULT_PLAYER_STATE if there's no mirror
-  // either (first-ever visit on this device, API unreachable) — without
-  // this last fallback, a brand-new device with no network left gameState
-  // as null, which crashed the HUD/War Room with nothing on screen and no
-  // visible error.
+  // either (first-ever visit on this device, API unreachable).
   async load() {
     try {
       const { state } = await api.getSave(this.playerId);
@@ -85,7 +97,8 @@ export class SaveManager {
     const state = this.gameState.snapshot();
     this._writeMirror(state);
     try {
-      await api.postSave(this.playerId, { state });
+      const res = await api.postSave(this.playerId, { state }, getSaveToken());
+      if (res && res.saveToken) setSaveToken(res.saveToken);
     } catch (err) {
       // Backend save failed (offline, server down) — the localStorage
       // mirror still has the latest state, so nothing is lost; it'll sync
@@ -96,7 +109,7 @@ export class SaveManager {
 
   async reportRunResult(runResult) {
     try {
-      await api.postRunResult(this.playerId, runResult);
+      await api.postRunResult(this.playerId, runResult, getSaveToken());
     } catch (err) {
       console.warn('[SaveManager] failed to log run result (non-fatal):', err.message);
     }

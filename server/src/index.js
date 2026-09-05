@@ -21,6 +21,7 @@ import { saveRouter } from './routes/save.js';
 import { leaderboardRouter } from './routes/leaderboard.js';
 import { healthRouter } from './routes/health.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { rateLimit } from './middleware/rateLimit.js';
 import './db/client.js'; // side effect: opens db + applies schema on boot
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,8 +32,26 @@ const CLIENT_DIST_PATH = process.env.CLIENT_DIST_PATH || path.join(__dirname, '.
 
 const app = express();
 
-app.use(cors()); // same-origin in production via Caddy; permissive for local dev across ports
+// CORS: lock down to known origins via CANDLE_RIDER_ALLOWED_ORIGINS
+// (comma-separated). When unset, reflect the Origin so local dev across
+// arbitrary Vite ports keeps working. Set the env var in production to the
+// deployed origin(s) (e.g. https://candlerider.degenwarrior.io).
+const allowedOrigins = process.env.CANDLE_RIDER_ALLOWED_ORIGINS
+  ? process.env.CANDLE_RIDER_ALLOWED_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
+  : null;
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin || !allowedOrigins) return cb(null, true);
+    return cb(null, allowedOrigins.includes(origin));
+  },
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'x-save-token'],
+}));
 app.use(express.json({ limit: '256kb' })); // save payloads are small; guard against abuse
+
+// Global per-IP rate limit across /api. Tighter per-route limits are
+// applied inside the routers themselves.
+app.use('/api', rateLimit({ windowMs: 60_000, max: 120 }));
 
 app.use('/api', healthRouter);
 app.use('/api', saveRouter);
