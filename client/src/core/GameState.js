@@ -12,6 +12,7 @@ import {
   bagToPnl,
   reputationForRun,
   convictionShardsForRun,
+  cascadeMultiplier,
   getPath,
 } from '@candle-rider/shared';
 import { eventBus } from './EventBus.js';
@@ -88,6 +89,7 @@ export class GameState {
     if (!this.currentRun) return null;
     const { pathId } = this.currentRun;
     this.state.bag = 0;
+    this.state.cascadeStreak = 0; // a lost run breaks the degen cascade
     this.currentRun = null;
     const result = { pathId, reason };
     eventBus.emit('run:lost', result);
@@ -103,16 +105,19 @@ export class GameState {
     const flawless = minHealthSeen >= 90;
 
     const pnlEarned = bagToPnl(bag);
-    const reputationEarned = reputationForRun({ pnlEarned, bossDefeated });
+    const cascadeStreak = (this.state.cascadeStreak ?? 0) + 1;
+    const cascade = cascadeMultiplier(cascadeStreak);
+    const reputationEarned = Math.round(reputationForRun({ pnlEarned, bossDefeated }) * cascade);
     const shardsEarned = convictionShardsForRun({ bossDefeated, flawless });
 
     this.state.pnl += pnlEarned;
     this.state.reputation += reputationEarned;
     this.state.convictionShards += shardsEarned;
+    this.state.cascadeStreak = cascadeStreak;
     this.addXp(Math.round(pnlEarned * 0.2));
     this.bumpPathMastery(pathId, bossDefeated ? 2 : 1);
 
-    const result = { pathId, pnlEarned, reputationEarned, shardsEarned, bossDefeated, flawless };
+    const result = { pathId, pnlEarned, reputationEarned, shardsEarned, bossDefeated, flawless, cascadeStreak, cascadeMultiplier: cascade };
     this.state.bag = 0;
     this.currentRun = null;
     eventBus.emit('run:cashout', result);

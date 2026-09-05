@@ -20,6 +20,11 @@ export const TRENCHES_COINS = [
   { id: 'fresh',    symbol: '$FRESH',   name: 'Fresh Launch', color: 0xff7766, base: 12.15, ramp: 0.162, cap: 9.45 },
   { id: 'degen',    symbol: '$DEGEN',   name: 'Pure Degen Play', color: 0xff5577, base: 13.5, ramp: 0.18,  cap: 10.5 },
   { id: 'apemax',   symbol: '$APEMAX',  name: 'Maximum Ape', color: 0xff3355, base: 15.0, ramp: 0.2,   cap: 11.5 },
+  { id: 'fomo',     symbol: '$FOMO',    name: 'FOMO Entry',        color: 0xff4dd2, base: 16.2,  ramp: 0.21,  cap: 12.3 },
+  { id: 'wagmi',    symbol: '$WAGMI',   name: 'WAGMI Ser',         color: 0xb14dff, base: 17.4,  ramp: 0.225, cap: 13.0 },
+  { id: 'cope',     symbol: '$COPE',    name: 'Cope Reserve',      color: 0x4dd2ff, base: 18.6,  ramp: 0.24,  cap: 13.8 },
+  { id: 'rekt',     symbol: '$REKT',    name: 'Rekt Casino',       color: 0xff8a3d, base: 19.8,  ramp: 0.255, cap: 14.6 },
+  { id: 'ngmi',     symbol: '$NGMI',    name: 'NGMI Death Spiral',  color: 0x8a3dff, base: 21.0,  ramp: 0.27,  cap: 15.4 },
   // Mastery unlock — invisible/locked until the player has actually earned
   // it via repeated cash-outs (see requiresMastery, checked against
   // gameState.state.pathMastery.trenches in TrenchesScene's coin room).
