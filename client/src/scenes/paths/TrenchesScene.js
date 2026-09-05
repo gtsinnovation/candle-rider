@@ -170,11 +170,20 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   doorRight.style.borderLeft = '2px solid #3a3a6f';
   root.appendChild(doorLeft);
   root.appendChild(doorRight);
-  // Open on next frame so the CSS transition actually plays.
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    doorLeft.style.transform = 'translateX(-100%)';
-    doorRight.style.transform = 'translateX(100%)';
-  }));
+  function openDoors() {
+    // Two frames so the CSS transition actually plays instead of jumping
+    // straight to its end state.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      doorLeft.style.transform = 'translateX(-100%)';
+      doorRight.style.transform = 'translateX(100%)';
+    }));
+  }
+  // Returning players: doors open immediately, as before. First-time
+  // players: the reveal is deferred until the welcome modal (below) is
+  // dismissed, so the curtain-opening moment actually happens AFTER they
+  // finish reading, instead of playing silently behind the modal while
+  // they read and being already-open the instant they dismiss it.
+  if (!isFirstTimeEver) openDoors();
 
   // ---------- Coin-room instructions + focus indicator (DOM) ----------
   const roomHint = document.createElement('div');
@@ -205,7 +214,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       : 'A/D or arrow keys to change lanes, Space or left-click to jump — tap again mid-air to climb higher.';
     welcomeModal.innerHTML = `
       <div style="max-width:420px; background:linear-gradient(180deg,#141428,#0a0a18); border:1px solid #3a3a6f; border-radius:14px; padding:28px 26px;">
-        <div style="font-size:22px; font-weight:800; color:#7dffcf; margin-bottom:10px; text-shadow:0 0 14px rgba(125,255,207,.5);">WELCOME TO THE TRENCHES</div>
+        <div style="font-size:22px; font-weight:800; color:#7dffcf; margin-bottom:2px; text-shadow:0 0 14px rgba(125,255,207,.5);">WELCOME TO THE TRENCHES</div>
+        <div style="font-size:12px; color:#9a9ac0; margin-bottom:14px; font-style:italic;">A fun game for Degen entertainment</div>
         <div style="font-size:13px; color:#c9c9e6; line-height:1.6; margin-bottom:16px; text-align:left;">
           You're about to jump between scrolling memecoin candles — land on <b style="color:#7dffcf;">green</b> ones to grow your Bag, avoid <b style="color:#ff5577;">red</b> ones or take damage.
           <br/><br/>
@@ -223,6 +233,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       localStorage.setItem(HAS_SEEN_ONBOARDING_KEY, '1');
       roomActive = true;
       welcomeModal.remove();
+      openDoors();
       window.removeEventListener('keydown', onWelcomeKeydown);
     }
     function onWelcomeKeydown(e) {
