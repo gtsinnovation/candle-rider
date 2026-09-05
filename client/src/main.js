@@ -41,7 +41,7 @@ async function boot() {
     await saveManager.load(); // populates gameState from backend/local mirror; now has a 5s timeout, can no longer hang forever
 
     mountHUD(container, gameState);
-    mountInstallPrompt(container);
+    let teardownInstallPrompt = mountInstallPrompt(container);
 
     // Logs every voluntary cash-out to the backend for the leaderboard.
     // Losses (rug/liquidation/burnout) aren't logged as run results — they
@@ -68,6 +68,8 @@ async function boot() {
           return;
         }
         teardownScene?.();
+        teardownInstallPrompt?.(); // was persisting into gameplay and colliding with the bottom-anchored lane indicator/controls toast on mobile — the exact devices this banner targets
+        teardownInstallPrompt = null;
         teardownScene = mountScene(container, gameState, showHub);
       });
     }

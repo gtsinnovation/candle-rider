@@ -107,6 +107,12 @@ Last updated: alongside the Trenches step-jump + Bag Value chart additions.
 - A subtle audio tick fires once, only for the candle the player is currently standing on (not every candle in every lane, which would be noisy)
 - Turns rug-flip damage from a "gotcha" into a readable, reactable hazard — same underlying odds, meaningfully fairer *feel*
 
+### Mobile playability pass
+Follow-up sweep specifically covering everything added since the original mobile pass (coin room redesign, gate/onboarding modal, market events, streak display, Bag Value chart) — three real conflicts found and fixed:
+- **Install banner was colliding with in-game UI**: the "Add to Home Screen" prompt was mounted once globally and never torn down, so it persisted into actual Trenches gameplay — overlapping the lane indicator and controls toast in the same bottom-screen region, on the exact mobile devices it targets. Now dismissed automatically the instant a path scene mounts.
+- **Bag Value chart was too wide for narrow phones**: at its fixed 130px width, it ate a meaningful chunk of a ~375px-wide screen's playable area. Now shrinks to 84px on screens under 480px wide.
+- **Welcome modal had no overflow handling**: on a short viewport (e.g. a phone in landscape), the modal's body text plus dismiss button could overflow off-screen with no way to scroll to reach the button. Now scrollable if content exceeds the viewport.
+
 ### Comprehensive audit pass
 Systematic review of the client codebase (Trenches scene, GameState, SaveManager, WarRoomScene, HUD, server routes). Three real onboarding bugs found and fixed:
 - **Interrupted-onboarding edge case**: the session gate flag was set the instant "Enter the Trenches" was clicked, before the tutorial modal was even shown — abandoning the tab mid-modal could leave a player permanently unable to see the tutorial that session. Fixed by checking onboarding-completion independently of the session gate on every mount.

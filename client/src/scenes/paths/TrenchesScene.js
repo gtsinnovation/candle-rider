@@ -207,6 +207,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     welcomeModal.style.cssText = `
       position:absolute; inset:0; z-index:40; display:none; align-items:center; justify-content:center;
       background:rgba(3,3,10,.9); font-family:system-ui,sans-serif; text-align:center; padding:24px; box-sizing:border-box;
+      overflow-y:auto;
     `;
     const controlsLine = isTouchDevice
       ? 'Swipe left/right to change lanes, tap to jump — tap again mid-air to climb higher.'
@@ -434,14 +435,15 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // near-identical points a second — see note above.
   const CHART_MAX_POINTS = 40;
   const CHART_SAMPLE_INTERVAL = 0.35; // seconds between ticks
-  const CHART_W = 130;
-  const CHART_H = 190;
+  const isNarrowScreen = window.innerWidth < 480;
+  const CHART_W = isNarrowScreen ? 84 : 130;
+  const CHART_H = isNarrowScreen ? 130 : 190;
 
   const chartCanvas = document.createElement('canvas');
   chartCanvas.width = CHART_W;
   chartCanvas.height = CHART_H;
   chartCanvas.style.cssText = `
-    position:absolute; left:14px; top:50%; transform:translateY(-50%);
+    position:absolute; left:${isNarrowScreen ? 8 : 14}px; top:50%; transform:translateY(-50%);
     z-index:6; background:rgba(8,8,20,.55); border:1px solid #2a2a4a; border-radius:8px;
     pointer-events:none; display:none;
   `;
