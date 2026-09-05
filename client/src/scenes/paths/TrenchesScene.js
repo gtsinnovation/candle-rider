@@ -43,7 +43,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // `activeEvent`. Order matters for const/let, unlike function declarations.
   const HAS_SEEN_ONBOARDING_KEY = 'candlerider:hasSeenOnboarding';
   const isFirstTimeEver = !localStorage.getItem(HAS_SEEN_ONBOARDING_KEY);
-  let roomActive = !isFirstTimeEver; // returning players: room is interactive immediately, as before. First-timers: gated behind the welcome modal below.
+  let roomActive = false; // everyone starts gated behind the "ENTER THE TRENCHES" button now, not just first-timers behind the welcome modal
 
   // ---------- DOM scaffold (scene-specific UI only; global HUD covers
   // bag/health/energy/conviction/reputation already) ----------
@@ -152,22 +152,24 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   root.appendChild(overlay);
 
   // ---------- Door curtains (DOM) — split open on entry ----------
+  // Hue matches the reference art: deep black base with vivid green
+  // energy-line accents, rather than the previous dark navy/purple.
   const doorLeft = document.createElement('div');
   const doorRight = document.createElement('div');
   [doorLeft, doorRight].forEach((d) => {
     d.style.cssText = `
       position:absolute; top:0; bottom:0; width:50%; z-index:20;
       background:
-        repeating-linear-gradient(90deg, #0a0a18 0px, #12122a 3px, #0a0a18 6px),
-        linear-gradient(180deg, #1a1a34, #050510);
-      border-right:2px solid #3a3a6f; box-shadow: 0 0 40px rgba(125,255,207,.15);
-      transition: transform 1.3s cubic-bezier(.7,0,.2,1);
+        repeating-linear-gradient(90deg, #030a04 0px, #06170a 3px, #030a04 6px),
+        linear-gradient(180deg, #0a1f0f, #010402);
+      border-right:2px solid #18ff6e; box-shadow: 0 0 50px rgba(24,255,110,.25);
+      transition: transform 2.2s cubic-bezier(.7,0,.2,1);
     `;
   });
   doorLeft.style.left = '0';
   doorRight.style.left = '50%';
   doorRight.style.borderRight = 'none';
-  doorRight.style.borderLeft = '2px solid #3a3a6f';
+  doorRight.style.borderLeft = '2px solid #18ff6e';
   root.appendChild(doorLeft);
   root.appendChild(doorRight);
   function openDoors() {
@@ -178,12 +180,43 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       doorRight.style.transform = 'translateX(100%)';
     }));
   }
-  // Returning players: doors open immediately, as before. First-time
-  // players: the reveal is deferred until the welcome modal (below) is
-  // dismissed, so the curtain-opening moment actually happens AFTER they
-  // finish reading, instead of playing silently behind the modal while
-  // they read and being already-open the instant they dismiss it.
-  if (!isFirstTimeEver) openDoors();
+
+  // ---------- Enter gate (DOM) — doors stay closed for EVERY player,
+  // first-time or returning, until this is clicked. Replaces the previous
+  // "returning players see doors auto-open" behavior with a single,
+  // consistent, deliberate entry moment. ----------
+  const enterGateStyle = document.createElement('style');
+  enterGateStyle.textContent = `
+    @keyframes trEnterPulse {
+      0%, 100% { box-shadow: 0 0 24px rgba(24,255,110,.55), 0 0 4px rgba(24,255,110,.8) inset; }
+      50% { box-shadow: 0 0 44px rgba(24,255,110,.9), 0 0 10px rgba(24,255,110,1) inset; }
+    }
+  `;
+  root.appendChild(enterGateStyle);
+
+  const enterButton = document.createElement('button');
+  enterButton.textContent = 'ENTER THE TRENCHES';
+  enterButton.style.cssText = `
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    z-index:30; background:#04140a; color:#18ff6e; border:2px solid #18ff6e;
+    padding:16px 34px; border-radius:10px; font-family:system-ui,sans-serif;
+    font-size:16px; font-weight:800; letter-spacing:2px; cursor:pointer;
+    text-shadow:0 0 10px rgba(24,255,110,.8); animation: trEnterPulse 1.8s ease-in-out infinite;
+  `;
+  root.appendChild(enterButton);
+
+  function enterTrenches() {
+    enterButton.remove();
+    enterGateStyle.remove();
+    if (isFirstTimeEver) {
+      welcomeModal.style.display = 'flex'; // shown after the gate now, not before
+    } else {
+      roomActive = true;
+      openDoors();
+    }
+  }
+  enterButton.addEventListener('click', enterTrenches);
+  let welcomeModal = null; // assigned below if this is a first-time player — declared here so enterTrenches (above) can reference it
 
   // ---------- Coin-room instructions + focus indicator (DOM) ----------
   const roomHint = document.createElement('div');
@@ -204,9 +237,9 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // hint. This explains the core concept up front. Returning players never
   // see this again (gated by isFirstTimeEver / roomActive above).
   if (isFirstTimeEver) {
-    const welcomeModal = document.createElement('div');
+    welcomeModal = document.createElement('div');
     welcomeModal.style.cssText = `
-      position:absolute; inset:0; z-index:40; display:flex; align-items:center; justify-content:center;
+      position:absolute; inset:0; z-index:40; display:none; align-items:center; justify-content:center;
       background:rgba(3,3,10,.9); font-family:system-ui,sans-serif; text-align:center; padding:24px; box-sizing:border-box;
     `;
     const controlsLine = isTouchDevice

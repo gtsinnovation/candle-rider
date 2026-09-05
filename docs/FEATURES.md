@@ -107,6 +107,12 @@ Last updated: alongside the Trenches step-jump + Bag Value chart additions.
 - A subtle audio tick fires once, only for the candle the player is currently standing on (not every candle in every lane, which would be noisy)
 - Turns rug-flip damage from a "gotcha" into a readable, reactable hazard — same underlying odds, meaningfully fairer *feel*
 
+### Entry gate ("Enter the Trenches")
+- Door hue recolored to match the game's key art (deep black with vivid green energy accents), replacing the earlier navy/purple palette
+- Doors now stay closed for **every** player — first-time or returning — until a glowing, pulsing "ENTER THE TRENCHES" button is clicked, rather than opening automatically on mount for returning players
+- Reveal transition slowed (1.3s → 2.2s) for a more deliberate curtain-opening moment
+- First-time players see the welcome modal *after* clicking the gate (not before); returning players skip straight to the door reveal
+
 ### New-player onboarding
 - A brand-new player was previously dropped straight into free-look camera controls and 11 unlabeled-risk coins with no guidance beyond a small persistent hint
 - Now: a one-time welcome modal (genuinely first visit only, tracked via localStorage, never shown again after) explains the core loop — green vs. red candles, how coin choice sets pace, controls (adapted to touch vs. keyboard/mouse), and the cash-out risk/reward — before the room becomes interactive
