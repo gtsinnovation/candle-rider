@@ -193,62 +193,15 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // ---------- Enter gate (DOM) — shown once per browser session, not
   // every single retry/hub-navigation. Fully skipped on repeat entries:
   // doors are already open (above) and the room is immediately active. ----------
-  let welcomeModal = null; // assigned below if this is a first-time player ever — declared here so enterTrenches (below) can reference it
-
-  if (hasEnteredThisSession) {
-    roomActive = true;
-  } else {
-    const enterGateStyle = document.createElement('style');
-    enterGateStyle.textContent = `
-      @keyframes trEnterPulse {
-        0%, 100% { box-shadow: 0 0 24px rgba(24,255,110,.55), 0 0 4px rgba(24,255,110,.8) inset; }
-        50% { box-shadow: 0 0 44px rgba(24,255,110,.9), 0 0 10px rgba(24,255,110,1) inset; }
-      }
-    `;
-    root.appendChild(enterGateStyle);
-
-    const enterButton = document.createElement('button');
-    enterButton.textContent = 'ENTER THE TRENCHES';
-    enterButton.style.cssText = `
-      position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-      z-index:30; background:#04140a; color:#18ff6e; border:2px solid #18ff6e;
-      padding:16px 34px; border-radius:10px; font-family:system-ui,sans-serif;
-      font-size:16px; font-weight:800; letter-spacing:2px; cursor:pointer;
-      text-shadow:0 0 10px rgba(24,255,110,.8); animation: trEnterPulse 1.8s ease-in-out infinite;
-    `;
-    root.appendChild(enterButton);
-
-    enterButton.addEventListener('click', () => {
-      enterButton.remove();
-      enterGateStyle.remove();
-      sessionStorage.setItem(HAS_ENTERED_SESSION_KEY, '1'); // gate never shows again this session, even on retry/hub-navigation
-      if (isFirstTimeEver) {
-        welcomeModal.style.display = 'flex'; // shown after the gate now, not before
-      } else {
-        roomActive = true;
-        openDoors();
-      }
-    });
-  }
-
-  // ---------- Coin-room instructions + focus indicator (DOM) ----------
-  const roomHint = document.createElement('div');
-  roomHint.style.cssText = `
-    position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
-    font-size:12px; color:#9a9ac0; text-align:center; z-index:6;
-    font-family: system-ui, sans-serif; pointer-events:none;
-  `;
-  roomHint.innerHTML = isTouchDevice
-    ? 'Drag to look around · Tap a coin to ape in and start the run'
-    : 'Drag to look around · Click a coin (or ←/→ + Enter) to ape in and start the run';
-  root.appendChild(roomHint);
+  let welcomeModal = null; // assigned below if onboarding hasn't been completed yet
+  let onWelcomeKeydown = null; // hoisted so teardown() can always safely remove it, even if the modal is abandoned mid-flow
 
   // ---------- First-time welcome modal ----------
-  // Shown exactly once ever, on a player's genuine first visit to Trenches
-  // — a brand-new player currently gets dropped straight into a free-look
-  // camera and 11 unlabeled-risk coins with nothing but a small persistent
-  // hint. This explains the core concept up front. Returning players never
-  // see this again (gated by isFirstTimeEver / roomActive above).
+  // Built (hidden) here, BEFORE the gate/session logic below, since that
+  // logic can call showWelcomeModal() immediately in one case (a player
+  // who passed the gate in an earlier visit this session but never
+  // finished onboarding) — showWelcomeModal must never run before
+  // welcomeModal actually exists.
   if (isFirstTimeEver) {
     welcomeModal = document.createElement('div');
     welcomeModal.style.cssText = `
@@ -275,19 +228,88 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       </div>
     `;
     root.appendChild(welcomeModal);
+  }
+
+  // Actually reveals the modal AND wires up its dismiss handlers — kept
+  // separate from creation so the Enter-key listener is only ever live
+  // while the modal is genuinely visible, not from scene-mount onward.
+  // That was the actual bug: previously the listener was attached
+  // unconditionally at creation time, so pressing Enter while just the
+  // "ENTER THE TRENCHES" button was showing (before it was even clicked)
+  // would silently skip the whole gate and tutorial.
+  function showWelcomeModal() {
+    welcomeModal.style.display = 'flex';
     function dismissWelcome() {
       localStorage.setItem(HAS_SEEN_ONBOARDING_KEY, '1');
       roomActive = true;
       welcomeModal.remove();
       openDoors();
       window.removeEventListener('keydown', onWelcomeKeydown);
+      onWelcomeKeydown = null;
     }
-    function onWelcomeKeydown(e) {
-      if (e.code === 'Enter') dismissWelcome();
-    }
+    onWelcomeKeydown = (e) => { if (e.code === 'Enter') dismissWelcome(); };
     welcomeModal.querySelector('#tr-welcome-dismiss').addEventListener('click', dismissWelcome);
     window.addEventListener('keydown', onWelcomeKeydown);
   }
+
+  // Session-gate (skip closed doors/button on repeat entries) and
+  // onboarding-completion (show the tutorial) are DELIBERATELY independent
+  // checks — a player who passes the gate but abandons the tutorial before
+  // clicking "LET'S GO" (closes the tab, navigates away) would otherwise
+  // never see it again for the rest of that session, since the gate itself
+  // would already be marked passed. Checking isFirstTimeEver here too,
+  // regardless of hasEnteredThisSession, closes that gap.
+  if (hasEnteredThisSession) {
+    if (isFirstTimeEver) {
+      showWelcomeModal(); // onboarding still incomplete — show it now, room stays inactive until dismissed
+    } else {
+      roomActive = true;
+    }
+  } else {
+    const enterGateStyle = document.createElement('style');
+    enterGateStyle.textContent = `
+      @keyframes trEnterPulse {
+        0%, 100% { box-shadow: 0 0 24px rgba(24,255,110,.55), 0 0 4px rgba(24,255,110,.8) inset; }
+        50% { box-shadow: 0 0 44px rgba(24,255,110,.9), 0 0 10px rgba(24,255,110,1) inset; }
+      }
+    `;
+    root.appendChild(enterGateStyle);
+
+    const enterButton = document.createElement('button');
+    enterButton.textContent = 'ENTER THE TRENCHES';
+    enterButton.style.cssText = `
+      position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+      z-index:30; background:#04140a; color:#18ff6e; border:2px solid #18ff6e;
+      padding:16px 34px; border-radius:10px; font-family:system-ui,sans-serif;
+      font-size:16px; font-weight:800; letter-spacing:2px; cursor:pointer;
+      text-shadow:0 0 10px rgba(24,255,110,.8); animation: trEnterPulse 1.8s ease-in-out infinite;
+    `;
+    root.appendChild(enterButton);
+
+    enterButton.addEventListener('click', () => {
+      enterButton.remove();
+      enterGateStyle.remove();
+      sessionStorage.setItem(HAS_ENTERED_SESSION_KEY, '1'); // gate never shows again this session, even on retry/hub-navigation
+      if (isFirstTimeEver) {
+        showWelcomeModal();
+      } else {
+        roomActive = true;
+        openDoors();
+      }
+    });
+  }
+
+  // ---------- Coin-room instructions + focus indicator (DOM) ----------
+  const roomHint = document.createElement('div');
+  roomHint.style.cssText = `
+    position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+    font-size:12px; color:#9a9ac0; text-align:center; z-index:6;
+    font-family: system-ui, sans-serif; pointer-events:none;
+  `;
+  roomHint.innerHTML = isTouchDevice
+    ? 'Drag to look around · Tap a coin to ape in and start the run'
+    : 'Drag to look around · Click a coin (or ←/→ + Enter) to ape in and start the run';
+  root.appendChild(roomHint);
 
   const coinLabel = document.createElement('div');
   coinLabel.style.cssText = `
@@ -1343,6 +1365,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     window.removeEventListener('keydown', keydown);
     window.removeEventListener('keyup', keyup);
     window.removeEventListener('resize', resize);
+    if (onWelcomeKeydown) window.removeEventListener('keydown', onWelcomeKeydown); // safety net — normally already removed by dismissWelcome(), but covers the case where the scene tears down before onboarding was ever completed
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerUp);
     renderer.domElement.removeEventListener('pointerdown', onPointerDown);

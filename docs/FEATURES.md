@@ -107,6 +107,14 @@ Last updated: alongside the Trenches step-jump + Bag Value chart additions.
 - A subtle audio tick fires once, only for the candle the player is currently standing on (not every candle in every lane, which would be noisy)
 - Turns rug-flip damage from a "gotcha" into a readable, reactable hazard — same underlying odds, meaningfully fairer *feel*
 
+### Comprehensive audit pass
+Systematic review of the client codebase (Trenches scene, GameState, SaveManager, WarRoomScene, HUD, server routes). Three real onboarding bugs found and fixed:
+- **Interrupted-onboarding edge case**: the session gate flag was set the instant "Enter the Trenches" was clicked, before the tutorial modal was even shown — abandoning the tab mid-modal could leave a player permanently unable to see the tutorial that session. Fixed by checking onboarding-completion independently of the session gate on every mount.
+- **Premature Enter-key dismiss**: the modal's Enter-to-dismiss listener was attached at scene mount, before the gate button was even clicked — pressing Enter while just the gate was showing silently skipped the whole intro. Fixed by only attaching the listener when the modal is actually shown.
+- **Listener leak**: that same listener was never cleaned up if the modal was abandoned. Now removed in `teardown()` as a safety net regardless of how the scene exits.
+
+Lower-priority items noted but not yet fixed: the global HUD re-renders on every gameplay tick (up to 60/sec) since its teardown is discarded in `main.js` — same class of problem the Bag chart was deliberately throttled to avoid; and the market-event screen vignette can freeze mid-color if a run ends while an event is active (cosmetic only).
+
 ### Entry gate ("Enter the Trenches")
 - Door hue recolored to match the game's key art (deep black with vivid green energy accents), replacing the earlier navy/purple palette
 - The gate (closed doors + glowing "ENTER THE TRENCHES" button) now shows **once per browser session** (tracked via `sessionStorage`, resets on a fresh tab/reload) — not on every retry or hub-navigation within the same session, which would have gotten old fast. Repeat entries within a session skip straight to an already-open room
