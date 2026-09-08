@@ -1147,7 +1147,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       idleWarning.style.display = 'none';
     }
 
-    speed = difficulty.base + Math.min(elapsed * difficulty.ramp, difficulty.cap);
+    speed = difficulty.base + Math.min(elapsed * difficulty.ramp, difficulty.rampCap);
 
     if (!activeEvent && elapsed >= nextEventAt) triggerMarketEvent();
     if (activeEvent && elapsed >= eventEndsAt) endMarketEvent();
