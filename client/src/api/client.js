@@ -11,11 +11,10 @@ async function request(path, options = {}) {
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const { headers: customHeaders, ...rest } = options;
     const res = await fetch(`${BASE}${path}`, {
-      headers: { 'Content-Type': 'application/json', ...(customHeaders || {}) },
+      headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
-      ...rest,
+      ...options,
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -35,18 +34,16 @@ async function request(path, options = {}) {
 export const api = {
   getSave: (playerId) => request(`/save/${playerId}`),
 
-  postSave: (playerId, { state, displayName }, saveToken) =>
+  postSave: (playerId, { state, displayName }) =>
     request(`/save/${playerId}`, {
       method: 'POST',
       body: JSON.stringify({ state, displayName }),
-      headers: saveToken ? { 'x-save-token': saveToken } : {},
     }),
 
-  postRunResult: (playerId, runResult, saveToken) =>
+  postRunResult: (playerId, runResult) =>
     request(`/save/${playerId}/run-result`, {
       method: 'POST',
       body: JSON.stringify(runResult),
-      headers: saveToken ? { 'x-save-token': saveToken } : {},
     }),
 
   getLeaderboard: (sort = 'reputation', limit = 20) =>
