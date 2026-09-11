@@ -1120,9 +1120,22 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
   function lose(title, reason) {
     if (ended) return;
+    // Capture the bag BEFORE loseRun() zeroes it — a player who dies
+    // previously never learned what the run was actually worth, which
+    // wastes the entire emotional point of a "cash out or lose it all"
+    // design. "You just forfeited $340" is the punishment landing.
+    const forfeited = Math.round(gameState.currentRun?.bag ?? 0);
+    const best = gameState.state.bestPnlRun ?? 0;
     gameState.loseRun(reason);
     sfx.loss();
-    showOverlay(title, reason, '#ff5577');
+    let summary = reason;
+    if (forfeited > 0) {
+      summary += ` You forfeited $${forfeited.toLocaleString()}.`;
+      if (best > 0 && forfeited > best) {
+        summary += ` That would have been a new personal best — ouch.`;
+      }
+    }
+    showOverlay(title, summary, '#ff5577');
   }
 
   overlay.querySelector('#tr-retry-btn').addEventListener('click', () => {
