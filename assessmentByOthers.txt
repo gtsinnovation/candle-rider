@@ -1,0 +1,45 @@
+# Candle Rider — Game Review
+
+## What the game is
+
+Degen Warrior is a single-screen canvas arcade game (`src/components/degen/DegenEngine.js`, wired up from `src/pages/DegenWarrior.jsx`). A warrior character rides a scrolling row of "candles" (crypto price-chart bars): landing on a green candle grows a virtual cash "bag" by 10%, landing on a red one shrinks it by 10%, floating drone "rug bots" can be shot for a 25% bag bonus but deal flat damage on contact, and the player can cash out at any time to bank the current bag value as a leaderboard score. It's themed around crypto/meme-coin trading slang (bag, rug, cash out, liquidity) with a neon-green industrial-skyline aesthetic, synthesized sound effects, a speed selector, a leaderboard, and social share links.
+
+## Overall assessment
+
+The core loop (jump timing + risk/reward landing + shoot-for-bonus + cash-out-before-you-bust) is a legitimate, recognizable arcade formula and is implemented cleanly in a single self-contained engine file — no framework overhead, smooth requestAnimationFrame loop, synthesized audio so there are no asset-loading delays. For a lightweight browser diversion it holds together and the presentation (glow effects, particles, floating score text, lightning, parallax skyline) reads as more polished than a typical one-off game. However, a few things undercut how fun and complete it feels in practice, detailed below.
+
+## Functionality issues
+
+- **"How to Play" describes a feature that doesn't exist.** The help dialog (`HowToPlay.jsx`) tells players "Chain jumps between candles to build a combo multiplier on green landing bonuses." No such multiplier exists anywhere in `DegenEngine.js` — every green landing pays a flat +10% of the current bag regardless of streak. Players who read the instructions and try to play around a combo system are chasing a mechanic that was never built. This should either be implemented or removed from the copy.
+- **Losing screens never show the final bag value.** `ResultScreen.jsx` only prints the numeric bag amount for the WIN ("cash out") case. All three loss endings (rekt to zero, fallen off the bottom of the screen, rug-bot raid) show flavor text only. This is a real gap for the "falling off screen" ending specifically, since the bag is *not* forced to zero there — the player loses without ever being told what their score was, even though that same run is being submitted to the leaderboard behind the scenes.
+- **Player count is silently broken for anyone not logged in.** The heartbeat call (`playerHeartbeat` function) requires an authenticated user and returns 401 otherwise; the page calls it unconditionally on load and every 15s. The failure is swallowed, so a visitor who hasn't logged in just sees "Players: —" forever with no indication anything is wrong — it looks like a broken/unimplemented feature rather than a login-gated one.
+- **Footer legal links are dead placeholders.** "Privacy / Security / Terms" all point to `href="#"`. Harmless, but they read as broken links to a visitor.
+
+## Balance / "is it fun" observations
+
+- **The odds are stacked in the player's favor by design**, which softens the tension the game is trying to create. Candles spawn green ~60% of the time, and a green landing (+10%) and red landing (−10%) are symmetric in size, so the expected value of landing is positive (~+2% bag per landing, compounding). Combined with free, uncapped, no-cooldown laser shots that always pay +25% per rug-bot kill with no real risk (the only downside is a flat −20 hit if you let a bot touch you, which is easy to avoid by shooting from range), a reasonably careful player is playing a slow, near-guaranteed climb rather than a tense gambling loop. The "rug" in the theme rarely actually happens — dying mostly comes from platforming mistakes (missing a jump, falling off the bottom) rather than the bag mechanic itself.
+- **The trend indicator (BULLISH/RUGGING/CHOPPY) is purely cosmetic.** It reflects recent actions but doesn't feed back into difficulty, spawn rates, or rewards, so it's a nice HUD flourish but not a game mechanic — a missed opportunity to make it matter.
+- **No persistence of settings.** Speed mode and sound on/off reset on every reload; a returning player has to re-pick their preferred speed every session.
+- **Difficulty ramp is passive.** Scroll speed increases slowly and automatically with elapsed time regardless of chosen speed mode, which is reasonable for an endless-runner feel, but there's no visible feedback (e.g., a rising intensity/difficulty indicator) telling the player the game is getting harder — it's discoverable only by feel.
+
+## Usability
+
+- Controls are simple and clearly documented in two places (inline caption under the game and the "How to Play" dialog), with separate, sensible schemes for desktop (keyboard + click) and mobile (tap left/right) — this is a genuine strength.
+- The floaty multi-air-jump system (up to 6 extra jumps, floatier while ascending) gives players real agency to pick which candle to land on, which is good design for letting skill matter — but it's not explained anywhere in the UI beyond "tap repeatedly to air-jump & float higher," so a first-time player is unlikely to discover they can choose their landing target rather than just spam-jumping to survive.
+- The game requires login only at the moment "Ape In" is pressed, which is a reasonable "try before you commit" flow, but there is no messaging on the start screen itself that an account is needed — a first-time visitor only learns this after clicking play and being bounced to a login page.
+- No pause control, and no confirmation before "Cash Out" (arguably fine given it's the goal action, but worth noting there's no way to back out of a run early other than winning or losing).
+
+## Comparison to a "basic fun and interactive" bar
+
+Against simple, addictive browser games (Flappy Bird, Chrome Dino, Doodle Jump, subway-surfer style runners), Degen Warrior has the right shape — one-input-to-start, quick restart loop, escalating difficulty, a leaderboard, and share buttons for virality — and the visual/audio polish exceeds most of that category's minimalism. What it's missing to hit the same addictive quality is the tension those games nail: they punish small mistakes immediately and consistently, whereas here the reward math statistically favors the player, so losses feel more like platforming slip-ups than "I got greedy and it cost me," which is the emotional hook the crypto/rug theme is clearly going for. Tightening the odds (or reintroducing risk into the laser mechanic), fixing the help text, and always showing the final bag on the result screen would close most of the gap between "functional" and "genuinely compelling."
+
+## Recommended fixes, in priority order
+
+1. Show the final bag amount on every result screen (win or lose), not just on cash-out.
+2. Reconcile the "How to Play" copy with actual scoring: either implement a real combo multiplier for consecutive green landings, or remove that line from the help dialog.
+3. Rebalance risk: reduce the green-candle spawn rate toward 50/50 (or make red losses slightly larger than green gains), and/or add a small cooldown or limited "ammo" to the laser so shooting rug bots is a deliberate risk/reward choice rather than a free win button.
+4. Make the player-count heartbeat degrade gracefully for logged-out visitors (e.g., allow an anonymous/public read of the active count, or hide the stat instead of showing a permanent "—").
+5. Persist speed and sound preferences (e.g., localStorage) across sessions.
+6. Replace or remove the placeholder Privacy/Security/Terms footer links.
+7. Add a one-line note on the start screen that playing requires a free account, so the login redirect isn't a surprise.
+
