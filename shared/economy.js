@@ -36,6 +36,7 @@ export const DEFAULT_PLAYER_STATE = Object.freeze({
   pnl: 0,
   reputation: 0,
   convictionShards: 0,
+  bestPnlRun: 0, // highest single-run PNL ever cashed out — drives the personal-best chase
   health: 100,
   energy: 100,
   conviction: 50,
@@ -47,18 +48,23 @@ export const DEFAULT_PLAYER_STATE = Object.freeze({
     narrative: 0,
     systematic: 0,
   },
-  cascadeStreak: 0, // consecutive cash-outs without a lost run — feeds the degen cascade multiplier
   tools: [], // equipped tool ids, max 3 per run (enforced client-side)
 });
 
 // ---------------------------------------------------------------------------
 // XP / Leveling curve
 // ---------------------------------------------------------------------------
-// XP required to reach the NEXT level from the current one. Mild exponential
-// curve — keeps early levels fast (hook the player) and later levels a grind
-// (retention), without needing a lookup table per level.
+// XP required to reach the NEXT level from the current one.
+//
+// REBALANCED: the original curve (500 * level^1.35) required ~17 runs for
+// the very first level-up at realistic earn rates — meaning a new player
+// could play an entire session and see literally nothing change. That's
+// the single biggest retention killer in a game like this; the first
+// session must contain a visible reward. Lowered the base and softened
+// the exponent so level 1->2 lands in ~3 runs and mid-levels stay in the
+// "a few sessions" range rather than the hundreds-of-runs range.
 export function xpToNextLevel(currentLevel) {
-  return Math.round(500 * Math.pow(currentLevel, 1.35));
+  return Math.round(100 * Math.pow(currentLevel, 1.18));
 }
 
 export function levelFromTotalXp(totalXp) {
@@ -215,16 +221,6 @@ export function reputationForRun({ pnlEarned, bossDefeated }) {
   return base + (bossDefeated ? 150 : 0);
 }
 
-// Cascade streak — a degen combo multiplier on Reputation. Each consecutive
-// cash-out (without a lost run in between) bumps the streak; losing a run
-// resets it to 0. Rewards players who keep sniping and cashing out instead
-// of holding one bag forever. Pure function so the server can re-derive it.
-export const CASCADE_STREAK_CAP = 10;
-export function cascadeMultiplier(streak) {
-  const s = Math.max(0, Math.min(streak, CASCADE_STREAK_CAP));
-  return 1 + s * 0.05; // up to +50% reputation at a 10-streak
-}
-
 // Conviction Shards: rare currency, only from boss kills or a "flawless" run
 // (health never dropped below 90 for the whole run).
 export function convictionShardsForRun({ bossDefeated, flawless }) {
@@ -241,7 +237,7 @@ export function convictionShardsForRun({ bossDefeated, flawless }) {
 export const SANITY_BOUNDS = Object.freeze({
   MAX_BAG_PER_RUN: 50000,        // generous ceiling for a single run's Bag
   MAX_PNL_DELTA_PER_SAVE: 50000,
-  MAX_REPUTATION_DELTA_PER_SAVE: 1200, // raised to accommodate the cascade streak multiplier (up to +50%)
+  MAX_REPUTATION_DELTA_PER_SAVE: 600,
   MAX_XP_DELTA_PER_SAVE: 5000,
   MAX_CONVICTION_SHARDS_DELTA_PER_SAVE: 3,
 });

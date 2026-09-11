@@ -107,6 +107,16 @@ Last updated: alongside the Trenches step-jump + Bag Value chart additions.
 - A subtle audio tick fires once, only for the candle the player is currently standing on (not every candle in every lane, which would be noisy)
 - Turns rug-flip damage from a "gotcha" into a readable, reactable hazard — same underlying odds, meaningfully fairer *feel*
 
+### Game design evaluation & rebalance
+Expert review of functionality, usability, addictability, virality, and core "fun" fundamentals. Scored well on functionality (solid engineering, no crashes) and usability (good onboarding/telegraphing), but **addictability and virality were the weak points** — and the numbers were stark:
+
+- **XP curve was badly miscalibrated.** At realistic earn rates (~30 XP per 30s run) the original curve required **~17 runs for the first level-up** and ~809 runs to reach level 8. A new player would play an entire session and see literally nothing change. Rebalanced from `500 * lvl^1.35` to `100 * lvl^1.18` — first level now lands in ~4 runs, level 10 in ~212 rather than thousands.
+- **No visible progress indicator.** The HUD showed raw numbers with no context or sense of movement. Added an XP progress bar so something visibly advances every single run.
+- **Coin choice was hollow.** Every coin paid identically per landing, so picking a faster/riskier coin was pure downside — the rational choice was always the safest option, making the whole 11-coin selection mechanic meaningless. Added `coinPayoutMultiplier()` scaling reward with risk (1.0x for $STABLE up to ~2.5x for $LEGEND), surfaced directly on each coin label so the tradeoff is visible at the point of decision.
+- **No personal best / no competition.** Nothing tracked whether a run was good, so every cash-out read identically. Added `bestPnlRun` tracking, a HUD display, and a cash-out screen that now gives a verdict ("NEW PERSONAL BEST", or how far short you fell) instead of a flat receipt.
+
+Still outstanding from the review: Reputation and PNL accumulate but nothing consumes them (two inert currencies); the leaderboard API exists server-side but is never called from the client (dead code); no score sharing or session-summary screenshot moment.
+
 ### Mobile playability pass
 Follow-up sweep specifically covering everything added since the original mobile pass (coin room redesign, gate/onboarding modal, market events, streak display, Bag Value chart) — three real conflicts found and fixed:
 - **Install banner was colliding with in-game UI**: the "Add to Home Screen" prompt was mounted once globally and never torn down, so it persisted into actual Trenches gameplay — overlapping the lane indicator and controls toast in the same bottom-screen region, on the exact mobile devices it targets. Now dismissed automatically the instant a path scene mounts.

@@ -17,7 +17,7 @@
 
 import * as THREE from 'three';
 import { eventBus } from '../../core/EventBus.js';
-import { TRENCHES_COINS, getLastCoinId, setLastCoinId, getCoinById } from './trenchesCoins.js';
+import { TRENCHES_COINS, getLastCoinId, setLastCoinId, getCoinById, coinPayoutMultiplier } from './trenchesCoins.js';
 import { sfx } from '../../core/AudioEngine.js';
 
 // World scale: candle blocks, lane spacing, and everything spatial except
@@ -117,7 +117,13 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     position:absolute; bottom:20px; right:22px; font-size:11px; color:#6f6f95;
     text-align:right; line-height:1.5; font-family: system-ui, sans-serif; z-index:5;
   `;
-  const isTouchDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || navigator.maxTouchPoints > 0;
+  // `navigator.maxTouchPoints > 0` alone was wrongly matching touchscreen
+  // laptops (showing desktop players mobile-only swipe/tap instructions).
+  // The `(pointer: coarse)` media query reflects the PRIMARY input device
+  // actually in use, so a touchscreen laptop driven by a mouse correctly
+  // reports as non-touch.
+  const isTouchDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || window.matchMedia('(pointer: coarse)').matches;
   hint.innerHTML = isTouchDevice
     ? 'Swipe ← / → : change lane<br/>Tap : jump'
     : 'A / D or ← → : change lane<br/>SPACE or LEFT CLICK : jump<br/>ESC : cash out';
@@ -646,6 +652,14 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     ctx.font = '20px system-ui, sans-serif';
     ctx.fillStyle = locked ? '#7a7a90' : '#c9c9e6';
     ctx.fillText(locked ? `Mastery Lv.${coin.requiresMastery} required` : coin.name, 128, 95);
+    if (!locked) {
+      // Surface the payout multiplier right on the coin — the risk/reward
+      // tradeoff has to be visible AT the point of decision, otherwise the
+      // player has no basis for choosing anything but the safest option.
+      ctx.font = 'bold 18px system-ui, sans-serif';
+      ctx.fillStyle = '#ffe066';
+      ctx.fillText(`${coinPayoutMultiplier(coin).toFixed(2)}x payout`, 128, 118);
+    }
     return new THREE.CanvasTexture(c);
   }
 
@@ -847,10 +861,12 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // to catch a mid-air faller.
   const startCandle = spawnCandle(0, 1, 'green'); // lane 1 = LANES[1] = 0, matches player's starting lane — always forced green, must be safe
 
+  let spawnLaneCursor = 0; // rotates through lanes so no lane goes too long without a candle (see the respawn loop in update())
   let cursorZ = -4 * WORLD_SCALE;
-  for (let i = 0; i < 24; i++) {
-    spawnCandle(cursorZ);
-    cursorZ -= (3.4 + Math.random() * 1.4) * WORLD_SCALE;
+  for (let i = 0; i < 30; i++) {
+    spawnCandle(cursorZ, spawnLaneCursor % 3);
+    spawnLaneCursor += 1 + Math.floor(Math.random() * 2);
+    cursorZ -= (2.1 + Math.random() * 0.9) * WORLD_SCALE;
   }
   // Hide the track candles during the coin room — only the platform the
   // hero is already standing on (startCandle) stays visible, so the scene
@@ -908,7 +924,9 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     laneGuides.forEach((line) => { line.visible = true; });
     touchButtonRow.style.display = 'flex';
     chartCanvas.style.display = 'block';
-    if (window.innerWidth >= 480) debugBox.style.display = 'block';
+    // Debug readout stays hidden by default now — it's a dev tool, not
+    // something a player should see. Press D during a run to toggle it on
+    // when actually debugging.
 
     // Defense-in-depth: force the player back to the guaranteed starting
     // lane/position regardless of any other state.
@@ -975,6 +993,11 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       if (e.code === 'ArrowLeft' || e.code === 'KeyA') setFocusedCoin(focusedCoinIndex - 1);
       if (e.code === 'ArrowRight' || e.code === 'KeyD') setFocusedCoin(focusedCoinIndex + 1);
       if (e.code === 'Enter') apeIntoCoin(TRENCHES_COINS[focusedCoinIndex]);
+      return;
+    }
+
+    if (e.code === 'KeyO' && started) { // dev-only debug readout toggle (O rather than D, which is already a lane-change key)
+      debugBox.style.display = debugBox.style.display === 'block' ? 'none' : 'block';
       return;
     }
 
@@ -1079,7 +1102,20 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     if (ended) return;
     const result = gameState.cashOut();
     sfx.cashOut();
-    showOverlay('CASHED OUT', `Banked $${result.pnlEarned.toLocaleString()} PNL and ${result.reputationEarned} Reputation.`, '#7dffcf');
+    // Give the run a VERDICT, not just a receipt. Previously every
+    // cash-out read identically regardless of whether it was a great run
+    // or a terrible one, so there was no emotional payoff and nothing to
+    // chase on the next attempt.
+    let summary = `Banked $${result.pnlEarned.toLocaleString()} PNL and ${result.reputationEarned} Reputation.`;
+    if (result.isNewBest && result.previousBest > 0) {
+      summary = `🏆 NEW PERSONAL BEST — $${result.pnlEarned.toLocaleString()}! (beat $${result.previousBest.toLocaleString()})`;
+    } else if (result.isNewBest) {
+      summary = `🏆 First cash-out: $${result.pnlEarned.toLocaleString()} PNL banked. That's the mark to beat.`;
+    } else if (result.previousBest > 0) {
+      const short = result.previousBest - result.pnlEarned;
+      summary += ` Best is $${result.previousBest.toLocaleString()} — $${short.toLocaleString()} to beat it.`;
+    }
+    showOverlay('CASHED OUT', summary, '#7dffcf');
   }
 
   function lose(title, reason) {
@@ -1219,9 +1255,20 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       }
       if (nextCursorZ === null || c.mesh.position.z < nextCursorZ) nextCursorZ = c.mesh.position.z;
     }
-    while (candles.length < 24 && !ended) {
-      cursorZ = (nextCursorZ !== null ? nextCursorZ : -4 * WORLD_SCALE) - (3.4 + Math.random() * 1.4) * WORLD_SCALE;
-      spawnCandle(cursorZ);
+    while (candles.length < 30 && !ended) {
+      // Spacing tightened (was 3.4-4.8 pre-scale). The real problem was
+      // that candles are randomly spread across 3 lanes, so consecutive
+      // SAME-LANE candles averaged ~3x the nominal gap — far beyond a
+      // single jump's ~3.1 unit forward reach, leaving the player with
+      // literally no reachable platform through no fault of their own.
+      // Tighter spacing + the lane-rotation below guarantees reachability.
+      cursorZ = (nextCursorZ !== null ? nextCursorZ : -4 * WORLD_SCALE) - (2.1 + Math.random() * 0.9) * WORLD_SCALE;
+      // Rotate through lanes rather than picking randomly — a purely random
+      // lane can produce long same-lane droughts. Rotation guarantees every
+      // lane gets a candle at least every 3 spawns, with a random offset so
+      // the pattern doesn't feel mechanically predictable.
+      spawnCandle(cursorZ, spawnLaneCursor % 3);
+      spawnLaneCursor += 1 + Math.floor(Math.random() * 2); // advance 1-2 lanes, keeps it varied but bounded
       nextCursorZ = cursorZ;
     }
 
@@ -1250,7 +1297,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
           c.scored = true;
           if (c.color === 'green') {
             const baseGain = 8 + Math.floor(Math.random() * 10);
-            const gain = activeEvent === 'pump' ? Math.round(baseGain * 1.5) : baseGain;
+            const riskMult = coinPayoutMultiplier(difficulty); // faster/riskier coins pay proportionally more — makes the coin choice a real decision
+            const gain = Math.round(baseGain * riskMult * (activeEvent === 'pump' ? 1.5 : 1));
             gameState.addBag(gain);
             streak += 1;
             sfx.landGreen();
