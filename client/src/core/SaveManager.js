@@ -11,6 +11,7 @@ import { eventBus } from './EventBus.js';
 import { DEFAULT_PLAYER_STATE } from '@candle-rider/shared';
 
 const PLAYER_ID_KEY = 'candlerider:playerId';
+const DISPLAY_NAME_KEY = 'candlerider:displayName';
 const STATE_MIRROR_KEY = 'candlerider:stateMirror';
 const SAVE_DEBOUNCE_MS = 4000;
 
@@ -85,7 +86,9 @@ export class SaveManager {
     const state = this.gameState.snapshot();
     this._writeMirror(state);
     try {
-      await api.postSave(this.playerId, { state });
+      // Send the display name too — the API always accepted one but the
+      // client never sent it, so every leaderboard row read 'Degen'.
+      await api.postSave(this.playerId, { state, displayName: getDisplayName() });
     } catch (err) {
       // Backend save failed (offline, server down) — the localStorage
       // mirror still has the latest state, so nothing is lost; it'll sync
@@ -116,4 +119,16 @@ export class SaveManager {
     const raw = localStorage.getItem(STATE_MIRROR_KEY);
     return raw ? JSON.parse(raw) : null;
   }
+}
+
+// Leaderboard identity. Deliberately local and anonymous — no account, no
+// login, consistent with the game having no wallet or auth anywhere.
+export function getDisplayName() {
+  return localStorage.getItem(DISPLAY_NAME_KEY) || 'Degen';
+}
+
+export function setDisplayName(name) {
+  const clean = String(name || '').trim().slice(0, 20) || 'Degen';
+  try { localStorage.setItem(DISPLAY_NAME_KEY, clean); } catch { /* non-fatal */ }
+  return clean;
 }

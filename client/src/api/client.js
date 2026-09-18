@@ -48,4 +48,13 @@ export const api = {
 
   getLeaderboard: (sort = 'reputation', limit = 20) =>
     request(`/leaderboard?sort=${sort}&limit=${limit}`),
+
+  // Best SINGLE run standings — the shareable kind.
+  getBestRuns: (pathId = 'trenches', limit = 20) =>
+    request(`/leaderboard/best-runs?pathId=${encodeURIComponent(pathId)}&limit=${limit}`),
+
+  // Where a given single-run score places globally. Powers the result
+  // card's rank line.
+  getRank: (pnl, pathId = 'trenches') =>
+    request(`/leaderboard/rank?pnl=${encodeURIComponent(pnl)}&pathId=${encodeURIComponent(pathId)}`),
 };

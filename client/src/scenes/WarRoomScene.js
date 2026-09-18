@@ -10,6 +10,7 @@
 
 import { PATHS, heroArtUrl } from '@candle-rider/shared';
 import { eventBus } from '../core/EventBus.js';
+import { mountLeaderboard } from '../ui/Leaderboard.js';
 
 let stylesInjected = false;
 function injectResponsiveStyles() {
@@ -44,12 +45,34 @@ export function mountWarRoom(container, gameState, onSelectPath) {
   `;
   container.appendChild(el);
 
-  function render() {
+  // Standings entry point. The leaderboard API existed for a while with no
+  // UI at all — rank showed on result cards but players couldn't browse or
+  // see who to chase, which is most of the competitive pull.
+  const lbButton = document.createElement('button');
+  lbButton.textContent = '🏆 TOP DEGENS';
+  lbButton.style.cssText = `
+    position:absolute; top:16px; right:18px; z-index:20;
+    background:rgba(24,255,110,.12); color:#18ff6e; border:1px solid #18ff6e;
+    border-radius:8px; padding:9px 15px; font-size:12px; font-weight:800;
+    letter-spacing:1px; cursor:pointer; font-family:system-ui,sans-serif;
+  `;
+  lbButton.addEventListener('click', () => {
+    mountLeaderboard(container, { playerId: localStorage.getItem('candlerider:playerId') });
+  });
+  container.appendChild(lbButton);
+
+  // i7: cards are built ONCE. The previous version cleared innerHTML and
+  // rebuilt all five cards — including their <img> tags — on every
+  // state:changed event. Those five hero images total ~18.8MB, so each
+  // update forced the browser to tear down and re-decode all of them.
+  // Only the mastery line actually changes, so that's all we repaint.
+  const masteryFields = {};
+
+  function buildCards() {
     const state = gameState.snapshot();
     el.innerHTML = '';
     PATHS.forEach((path) => {
       const unlocked = state.unlockedPaths.includes(path.id);
-      const mastery = state.pathMastery[path.id] ?? 0;
 
       const card = document.createElement('div');
       card.style.cssText = `
@@ -67,10 +90,11 @@ export function mountWarRoom(container, gameState, onSelectPath) {
           <div style="font-size:13px;font-weight:700;margin-bottom:2px;">${path.name}</div>
           <div style="font-size:10px;color:#9a9ac0;margin-bottom:6px;">${path.theme}</div>
           <div style="font-size:11px;color:#9a9ac0;margin-bottom:10px;">${path.genre}</div>
-          <div style="font-size:11px;margin-bottom:4px;">Mastery Lv. ${mastery}</div>
+          <div data-mastery style="font-size:11px;margin-bottom:4px;"></div>
           <div style="font-size:10px;color:#7d7da0;">Boss: ${path.boss.name}</div>
         </div>
       `;
+      masteryFields[path.id] = card.querySelector('[data-mastery]');
 
       if (unlocked) {
         card.addEventListener('click', () => {
@@ -83,10 +107,22 @@ export function mountWarRoom(container, gameState, onSelectPath) {
     });
   }
 
-  render();
-  const unsubscribe = eventBus.on('state:changed', render);
+  function paintMastery() {
+    const state = gameState.snapshot();
+    PATHS.forEach((path) => {
+      const field = masteryFields[path.id];
+      if (!field) return;
+      const text = `Mastery Lv. ${state.pathMastery[path.id] ?? 0}`;
+      if (field.textContent !== text) field.textContent = text;
+    });
+  }
+
+  buildCards();
+  paintMastery();
+  const unsubscribe = eventBus.on('state:changed', paintMastery);
   return () => {
     unsubscribe();
+    lbButton.remove();
     el.remove();
   };
 }
