@@ -184,11 +184,15 @@ export const PATHS = Object.freeze([
 ]);
 
 export function heroArtUrl(pathId) {
-  return `/assets/heroes/${pathId}.png`;
+  return `/assets/heroes/${pathId}.webp`;
 }
 
+// NOTE: boss art is NOT currently shipped in client/public — no boss
+// encounter exists yet, and the five PNGs were 17MB of the bundle for
+// something never loaded. They live in assets-source/ instead. Re-encode
+// them to .webp and restore them to client/public before calling this.
 export function bossArtUrl(pathId) {
-  return `/assets/bosses/${getPath(pathId).boss.id}.png`;
+  return `/assets/bosses/${getPath(pathId).boss.id}.webp`;
 }
 
 export function getPath(pathId) {

@@ -49,10 +49,11 @@ export function mountWarRoom(container, gameState, onSelectPath) {
   // UI at all — rank showed on result cards but players couldn't browse or
   // see who to chase, which is most of the competitive pull.
   const lbButton = document.createElement('button');
-  lbButton.textContent = '🏆 TOP DEGENS';
+  lbButton.textContent = '🏆 TOP DEGEN TRENCHER';
   lbButton.style.cssText = `
     position:absolute; top:16px; right:18px; z-index:20;
-    background:rgba(24,255,110,.12); color:#18ff6e; border:1px solid #18ff6e;
+    background:linear-gradient(90deg,rgba(255,215,0,.14),rgba(24,255,110,.14));
+    color:#ffe066; border:1px solid rgba(255,215,0,.65);
     border-radius:8px; padding:9px 15px; font-size:12px; font-weight:800;
     letter-spacing:1px; cursor:pointer; font-family:system-ui,sans-serif;
   `;

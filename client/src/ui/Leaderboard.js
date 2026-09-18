@@ -25,7 +25,10 @@ export function mountLeaderboard(container, { playerId, onClose }) {
     <div style="width:min(520px,94vw); max-height:86vh; overflow-y:auto; background:linear-gradient(180deg,#0f1a14,#05070a);
                 border:1px solid #18ff6e; border-radius:14px; padding:22px 20px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-        <div style="font-size:19px; font-weight:800; color:#18ff6e; letter-spacing:1px;">TOP DEGENS</div>
+        <div style="font-size:21px; font-weight:900; letter-spacing:1px;
+                    background:linear-gradient(90deg,#ffd700 0%,#ffe680 30%,#7dffcf 70%,#18ff6e 100%);
+                    -webkit-background-clip:text; background-clip:text; color:transparent;
+                    -webkit-text-fill-color:transparent; filter:drop-shadow(0 0 10px rgba(255,215,0,.35));">TOP DEGEN TRENCHER</div>
         <button id="cr-lb-close" style="background:transparent;border:none;color:#6f6f95;font-size:22px;cursor:pointer;line-height:1;">×</button>
       </div>
       <div style="font-size:11px; color:#7d7da0; margin-bottom:16px;">Best single run in the Trenches</div>
@@ -33,13 +36,13 @@ export function mountLeaderboard(container, { playerId, onClose }) {
       <div style="margin-top:18px; padding-top:14px; border-top:1px solid #1c2a22;">
         <div style="font-size:10px; letter-spacing:1.5px; color:#6f6f95; margin-bottom:6px;">YOUR NAME ON THE BOARD</div>
         <div style="display:flex; gap:8px;">
-          <input id="cr-lb-name" maxlength="20" placeholder="Degen"
+          <input id="cr-lb-name" maxlength="20" placeholder="Your handle"
             style="flex:1; background:#0d0d1c; color:#eef0ff; border:1px solid #2a2a4a; border-radius:7px;
                    padding:8px 10px; font-family:system-ui,sans-serif; font-size:12px;" />
           <button id="cr-lb-save" style="background:#18ff6e; color:#04140a; border:none; border-radius:7px;
                    padding:8px 16px; font-size:12px; font-weight:800; cursor:pointer;">SAVE</button>
         </div>
-        <div id="cr-lb-name-note" style="font-size:10px; color:#6f6f95; margin-top:6px;">Applies to your next cash-out.</div>
+        <div id="cr-lb-name-note" style="font-size:10px; color:#6f6f95; margin-top:6px;">Auto-assigned. Change it if you like — applies to your next cash-out.</div>
       </div>
     </div>
   `;

@@ -113,103 +113,34 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
   let lastBurnTickSecond = -1; // so the low-energy tick fires once per second, not per frame
 
-  // ---------- Greed ladder ----------
-  // Replaces the old two-line burn warning ("CONVICTION FADING…"), which
-  // said one blunt thing about TIME while the player's actual tension was
-  // about MONEY. The bar still tracks energy; this line now tracks the Bag.
-  // Keeping both on the same element means one voice instead of two
-  // competing ones — the old warning and a greed line would have fired
-  // together on exactly the good runs that matter most, contradicting
-  // each other ("cash out now" vs "greed tastes good").
-  //
-  // Thresholds are multiples of a baseline, scaled by the coin's payout
-  // multiplier: a flat $1,000 would fire constantly on $LEGEND (2.6x) and
-  // almost never on $STABLE (1.0x), so the same tier would mean completely
-  // different things depending on the coin.
-  const GREED_BASE = 450;
-  const GREED_TIERS = [
-    { mult: 9.0, key: 'critical', colour: '#ff3355', flash: true,
-      text: '⚠️ CRITICAL RISK — the chart is vertical. BANK IT NOW.' },
-    { mult: 6.0, key: 'crazy', colour: '#ff9933',
-      text: "🤑 CRAZY RICH. You're flexing on the timeline — and the Dev is watching." },
-    { mult: 4.0, key: 'extreme', colour: '#8cff5c',
-      text: '🚀 Extreme extension. One click saves these generational gains. Just one click…' },
-    { mult: 2.6, key: 'bullish', colour: '#18ff6e',
-      text: "🐂 Pure bullish momentum. Greed is starting to taste real good, isn't it?" },
-    { mult: 1.6, key: 'hot', colour: '#5cffb0',
-      text: "🔥 Getting hot. Volume is spiking — don't look away from the candle." },
-    { mult: 1.0, key: 'rolling', colour: '#7dffcf',
-      text: '🔄 Rolling green. Cashing out now is the smart play… but the trenches are calling.' },
-    { mult: 0.45, key: 'warming', colour: '#ffe066',
-      text: "⚡ You're up. A solid lunch is paid for. Secure the bag, or let it ride?" },
-  ];
-
-  let lastGreedKey = null;
-
-  function greedTierFor(bag) {
-    const scale = GREED_BASE * (difficulty.payMul ?? 1);
-    return GREED_TIERS.find((t) => bag >= t.mult * scale) || null;
-  }
-
   function updateBurnBar(energy) {
     const pct = Math.max(0, Math.min(100, energy));
     burnFill.style.width = `${pct}%`;
     burnPct.textContent = `${Math.round(pct)}%`;
 
-    // The BAR still tracks time (energy) — that signal is unchanged.
+    // Colour escalates as the run's clock runs down.
     const colour = pct > 55 ? '#18ff6e' : pct > 25 ? '#ffe066' : '#ff3355';
     burnFill.style.background = colour;
     burnPct.style.color = colour;
 
-    // Audible countdown in the last stretch — once per second so it reads
-    // as a clock rather than a buzz. Kept from the original warning.
-    if (pct <= 15) {
+    if (pct <= 25) {
+      burnWarn.textContent = 'CONVICTION FADING — CASH OUT OR LOSE IT';
+      burnWarn.style.color = '#ff3355';
+      burnWarn.style.opacity = String(0.55 + 0.45 * Math.abs(Math.sin(performance.now() * 0.006)));
+      // Audible countdown in the last stretch — once per second so it
+      // reads as a clock rather than a buzz.
       const sec = Math.floor(pct);
-      if (sec !== lastBurnTickSecond) {
+      if (sec !== lastBurnTickSecond && pct <= 15) {
         lastBurnTickSecond = sec;
         sfx.warning();
       }
-    }
-
-    // The LINE now tracks money (Bag). Running out of time still overrides
-    // everything, because at that point the clock genuinely is the story.
-    const bag = gameState.currentRun?.bag ?? 0;
-    if (pct <= 20) {
-      setGreedLine({
-        key: 'timeout', colour: '#ff3355', flash: true,
-        text: bag > 0
-          ? `⏳ CONVICTION FADING — $${Math.round(bag).toLocaleString()} ON THE LINE. CASH OUT.`
-          : '⏳ CONVICTION FADING — the run is nearly over.',
-      });
-      return;
-    }
-
-    const tier = greedTierFor(bag);
-    if (!tier) {
+    } else if (pct <= 55) {
+      burnWarn.textContent = 'Conviction draining';
+      burnWarn.style.color = '#ffe066';
+      burnWarn.style.opacity = '0.75';
+    } else {
       burnWarn.style.opacity = '0';
-      lastGreedKey = null;
-      return;
     }
-    setGreedLine(tier);
-  }
-
-  function setGreedLine(tier) {
-    // Re-render only on tier CHANGE so the entry animation actually plays;
-    // rewriting textContent every frame would make it look static and
-    // burn layout work 60x/sec for no reason.
-    if (tier.key !== lastGreedKey) {
-      lastGreedKey = tier.key;
-      burnWarn.textContent = tier.text;
-      burnWarn.style.color = tier.colour;
-      burnWarn.animate(
-        [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'translateY(0)' }],
-        { duration: 260, easing: 'ease-out' }
-      );
-      sfx.streak(3); // short confirmation blip on each new tier
-    }
-    burnWarn.style.opacity = tier.flash
-      ? String(0.5 + 0.5 * Math.abs(Math.sin(performance.now() * 0.006)))
-      : '0.9';
   }
   function updateStreakDisplay() {
     if (streak <= 1) {
@@ -852,7 +783,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     group.position.set(x, 1.1, z);
     group.lookAt(orbitTarget.x, group.position.y, orbitTarget.z); // each coin faces the center of the arc, not just whichever way it happened to spawn
 
-    const coinTexture = new THREE.TextureLoader().load(`/assets/coins/${coin.id}.png`);
+    const coinTexture = new THREE.TextureLoader().load(`/assets/coins/${coin.id}.webp`);
     const disc = new THREE.Mesh(
       new THREE.CircleGeometry(0.55, 32), // matches the original placeholder disc's radius exactly
       new THREE.MeshBasicMaterial({
@@ -942,7 +873,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // scene instead of showing as a black rectangle. Sprites always face
   // the camera automatically, which suits an endless-runner viewed from
   // a mostly-fixed chase angle.
-  const heroTexture = new THREE.TextureLoader().load('/assets/heroes/trenches-back-cutout.png');
+  const heroTexture = new THREE.TextureLoader().load('/assets/heroes/trenches-back-cutout.webp');
   const heroMat = new THREE.SpriteMaterial({ map: heroTexture, transparent: true });
   const heroSprite = new THREE.Sprite(heroMat);
   const HERO_HEIGHT = 2.1;
