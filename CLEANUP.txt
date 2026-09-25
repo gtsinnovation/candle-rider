@@ -1,0 +1,34 @@
+ASSET OPTIMIZATION — manual cleanup required
+============================================
+
+This package ADDS .webp files and updates the code to reference them.
+It cannot delete your old .png files, so you must remove them yourself
+or you'll still be shipping 43MB in the build.
+
+DELETE these from client/public/ (they are no longer referenced):
+
+  client/public/assets/bosses/          <- entire folder, 17MB, NEVER loaded
+                                           (bossArtUrl is exported but never
+                                           called; no boss encounter exists)
+
+  client/public/assets/heroes/*.png     <- all 6 PNGs, superseded by .webp
+  client/public/assets/coins/*.png      <- all 11 PNGs, superseded by .webp
+                                           (6 of them were already dead after
+                                           the i5 roster trim to 5 coins)
+
+KEEP THE ORIGINALS SOMEWHERE — they are your source art. Move them out of
+client/public so they aren't served, e.g.:
+
+  mkdir assets-source
+  move client\public\assets\bosses assets-source\
+  (then delete the .png files from client/public/assets/heroes and coins)
+
+PowerShell one-liner for the PNG removal:
+
+  Remove-Item client\public\assets\heroes\*.png, client\public\assets\coins\*.png
+
+VERIFY AFTER CLEANUP
+  1. npm run dev:client
+  2. DevTools > Network, filter "assets" — every request should be .webp
+     and return 200. Any 404 means a reference was missed.
+  3. Check the War Room cards and the in-game coins still render.

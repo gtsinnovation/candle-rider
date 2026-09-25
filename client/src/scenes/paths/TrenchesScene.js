@@ -16,9 +16,11 @@
 // the other four paths where Space is free for cash-out). P pauses.
 
 import * as THREE from 'three';
-import { eventBus } from '../../core/EventBus.js';
-import { TRENCHES_COINS, getLastCoinId, setLastCoinId, getCoinById, coinPayoutMultiplier } from './trenchesCoins.js';
+import { TRENCHES_COINS, getLastCoinId, setLastCoinId, getCoinById } from './trenchesCoins.js';
 import { sfx } from '../../core/AudioEngine.js';
+import { renderResultCard, copyCardToClipboard, downloadCard, buildShareText } from '../../ui/ResultCard.js';
+import { api } from '../../api/client.js';
+import { mountLeaderboard } from '../../ui/Leaderboard.js';
 
 // World scale: candle blocks, lane spacing, and everything spatial except
 // the hero were reduced 25% (0.75x) — the hero's own size (HERO_HEIGHT
@@ -35,6 +37,11 @@ const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // auto-pause at 10 minutes of inactivit
 
 export function mountTrenchesScene(container, gameState, onRunEnd) {
   gameState.startRun('trenches');
+
+  // A shared result card's link carries ?coin=<id>. Read it FIRST — both
+  // the coin-room focus index and the difficulty default below depend on
+  // it, and they sit hundreds of lines apart.
+  const deepLinkCoin = new URLSearchParams(window.location.search).get('coin');
 
   // Declared up front since the welcome modal (further down, in the DOM
   // scaffold section) references this before the orbit-camera setup
@@ -77,6 +84,63 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     text-shadow:0 0 12px currentColor;
   `;
   root.appendChild(streakDisplay);
+
+  // ---------- Energy burn-down bar (Phase 2.1) ----------
+  // Energy IS the run's clock — it drains from 100 to 0 in ~45s and ends
+  // the run. Previously it was a number in the HUD corner, so the timer
+  // was effectively invisible until it killed you. Tension in this genre
+  // comes from WATCHING yourself approach the edge, not being surprised
+  // by it, so it gets its own prominent bar with escalating colour.
+  const burnWrap = document.createElement('div');
+  burnWrap.style.cssText = `
+    position:absolute; top:16px; left:50%; transform:translateX(-50%);
+    width:min(420px, 60vw); z-index:6; display:none; font-family:system-ui,sans-serif;
+  `;
+  burnWrap.innerHTML = `
+    <div style="display:flex; justify-content:space-between; font-size:10px; letter-spacing:2px; color:#7d7da0; margin-bottom:3px;">
+      <span>CONVICTION BURN</span><span id="tr-burn-pct">100%</span>
+    </div>
+    <div style="height:10px; background:#14142a; border:1px solid #2a2a4a; border-radius:5px; overflow:hidden;">
+      <div id="tr-burn-fill" style="height:100%; width:100%; background:#18ff6e; border-radius:5px; transition:background .3s;"></div>
+    </div>
+    <div id="tr-burn-warn" style="font-size:11px; font-weight:700; text-align:center; margin-top:4px; opacity:0; transition:opacity .2s;"></div>
+  `;
+  root.appendChild(burnWrap);
+  const burnFill = burnWrap.querySelector('#tr-burn-fill');
+  const burnPct = burnWrap.querySelector('#tr-burn-pct');
+  const burnWarn = burnWrap.querySelector('#tr-burn-warn');
+
+  let lastBurnTickSecond = -1; // so the low-energy tick fires once per second, not per frame
+
+  function updateBurnBar(energy) {
+    const pct = Math.max(0, Math.min(100, energy));
+    burnFill.style.width = `${pct}%`;
+    burnPct.textContent = `${Math.round(pct)}%`;
+
+    // Colour escalates as the run's clock runs down.
+    const colour = pct > 55 ? '#18ff6e' : pct > 25 ? '#ffe066' : '#ff3355';
+    burnFill.style.background = colour;
+    burnPct.style.color = colour;
+
+    if (pct <= 25) {
+      burnWarn.textContent = 'CONVICTION FADING — CASH OUT OR LOSE IT';
+      burnWarn.style.color = '#ff3355';
+      burnWarn.style.opacity = String(0.55 + 0.45 * Math.abs(Math.sin(performance.now() * 0.006)));
+      // Audible countdown in the last stretch — once per second so it
+      // reads as a clock rather than a buzz.
+      const sec = Math.floor(pct);
+      if (sec !== lastBurnTickSecond && pct <= 15) {
+        lastBurnTickSecond = sec;
+        sfx.warning();
+      }
+    } else if (pct <= 55) {
+      burnWarn.textContent = 'Conviction draining';
+      burnWarn.style.color = '#ffe066';
+      burnWarn.style.opacity = '0.75';
+    } else {
+      burnWarn.style.opacity = '0';
+    }
+  }
   function updateStreakDisplay() {
     if (streak <= 1) {
       streakDisplay.style.opacity = '0';
@@ -151,10 +215,19 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   `;
   overlay.innerHTML = `
     <h2 id="tr-overlay-title" style="font-size:26px;color:#ff6688;margin:0 0 6px;text-shadow:0 0 16px rgba(255,102,136,.6);">RUGPULLED</h2>
-    <p id="tr-overlay-reason" style="color:#c9c9e6;font-size:13px;margin:4px 0 18px;max-width:360px;"></p>
+    <p id="tr-overlay-reason" style="color:#c9c9e6;font-size:13px;margin:4px 0 12px;max-width:420px;"></p>
+    <div id="tr-card-slot" style="margin-bottom:12px;max-width:min(600px,86vw);"></div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-bottom:10px;">
+      <button id="tr-share-btn" style="background:#18ff6e;color:#04140a;border:none;padding:10px 20px;border-radius:7px;font-size:13px;font-weight:800;cursor:pointer;">SHARE</button>
+      <button id="tr-copy-btn" style="background:#1a1a34;color:#eef0ff;border:1px solid #3a3a6f;padding:10px 18px;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;">COPY IMAGE</button>
+      <button id="tr-save-btn" style="background:#1a1a34;color:#eef0ff;border:1px solid #3a3a6f;padding:10px 18px;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;">SAVE</button>
+    </div>
+    <textarea id="tr-share-text" rows="2" style="width:min(600px,86vw);background:#0d0d1c;color:#eef0ff;border:1px solid #2a2a4a;border-radius:8px;padding:9px 11px;font-family:system-ui,sans-serif;font-size:12px;resize:none;margin-bottom:8px;box-sizing:border-box;"></textarea>
+    <div id="tr-share-status" style="font-size:11px;color:#7d7da0;height:14px;margin-bottom:8px;"></div>
     <div style="display:flex; gap:10px;">
       <button id="tr-retry-btn" style="background:#7dffcf;color:#05100c;border:none;padding:10px 22px;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;">RUN IT BACK</button>
       <button id="tr-hub-btn" style="background:#3a3a6f;color:#eef0ff;border:none;padding:10px 22px;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;">RETURN TO HUB</button>
+      <button id="tr-lb-btn" style="background:rgba(24,255,110,.12);color:#18ff6e;border:1px solid #18ff6e;padding:10px 18px;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;">🏆 STANDINGS</button>
     </div>
   `;
   root.appendChild(overlay);
@@ -346,7 +419,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
 
   const pauseHint = document.createElement('div');
   pauseHint.style.cssText = `
-    position:absolute; top:20px; left:50%; transform:translateX(-50%);
+    position:absolute; top:76px; left:50%; transform:translateX(-50%);
     font-size:11px; color:#6f6f95; z-index:5; font-family: system-ui, sans-serif; pointer-events:none;
   `;
   pauseHint.textContent = 'P — pause';
@@ -373,9 +446,36 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     cashOut();
   });
 
+  // Phase 2.2 — escalating cash-out pressure. Showing the live bankable
+  // figure turns the button from an abstract "end run" action into a
+  // running offer the player is actively refusing, which is the decision
+  // the whole game is built around. Urgency escalates with the clock.
+  const cashOutBtn = touchButtonRow.querySelector('#tr-cashout-btn');
+  function updateCashOutPressure(energy, bag) {
+    const amount = Math.round(bag);
+    cashOutBtn.textContent = amount > 0 ? `CASH OUT $${amount.toLocaleString()}` : 'CASH OUT';
+    if (energy <= 25) {
+      const pulse = 0.5 + 0.5 * Math.abs(Math.sin(performance.now() * 0.007));
+      cashOutBtn.style.background = `rgba(255,51,85,${0.25 + pulse * 0.5})`;
+      cashOutBtn.style.borderColor = '#ff3355';
+      cashOutBtn.style.color = '#fff';
+      cashOutBtn.style.transform = `scale(${1 + pulse * 0.06})`;
+    } else if (energy <= 55) {
+      cashOutBtn.style.background = 'rgba(255,224,102,.18)';
+      cashOutBtn.style.borderColor = '#ffe066';
+      cashOutBtn.style.color = '#ffe066';
+      cashOutBtn.style.transform = 'scale(1)';
+    } else {
+      cashOutBtn.style.background = 'rgba(125,255,207,.15)';
+      cashOutBtn.style.borderColor = '#7dffcf';
+      cashOutBtn.style.color = '#7dffcf';
+      cashOutBtn.style.transform = 'scale(1)';
+    }
+  }
+
   const idleWarning = document.createElement('div');
   idleWarning.style.cssText = `
-    position:absolute; top:60px; left:50%; transform:translateX(-50%);
+    position:absolute; top:100px; left:50%; transform:translateX(-50%);
     font-size:12px; color:#ffd166; background:rgba(0,0,0,.6); padding:6px 14px;
     border-radius:6px; z-index:6; font-family: system-ui, sans-serif;
     display:none; pointer-events:none;
@@ -658,7 +758,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       // player has no basis for choosing anything but the safest option.
       ctx.font = 'bold 18px system-ui, sans-serif';
       ctx.fillStyle = '#ffe066';
-      ctx.fillText(`${coinPayoutMultiplier(coin).toFixed(2)}x payout`, 128, 118);
+      ctx.fillText(`${(coin.payMul ?? 1).toFixed(1)}x · ${coin.axis}`, 128, 118);
     }
     return new THREE.CanvasTexture(c);
   }
@@ -682,7 +782,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     group.position.set(x, 1.1, z);
     group.lookAt(orbitTarget.x, group.position.y, orbitTarget.z); // each coin faces the center of the arc, not just whichever way it happened to spawn
 
-    const coinTexture = new THREE.TextureLoader().load(`/assets/coins/${coin.id}.png`);
+    const coinTexture = new THREE.TextureLoader().load(`/assets/coins/${coin.id}.webp`);
     const disc = new THREE.Mesh(
       new THREE.CircleGeometry(0.55, 32), // matches the original placeholder disc's radius exactly
       new THREE.MeshBasicMaterial({
@@ -712,11 +812,14 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   const raycaster = new THREE.Raycaster();
   const pointerNDC = new THREE.Vector2();
   let hoveredCoinIndex = -1;
-  let focusedCoinIndex = Math.max(0, TRENCHES_COINS.findIndex((c) => c.id === getLastCoinId()));
+  let focusedCoinIndex = Math.max(0, TRENCHES_COINS.findIndex((c) => c.id === (deepLinkCoin || getLastCoinId())));
 
   function setFocusedCoin(index) {
     focusedCoinIndex = Math.max(0, Math.min(TRENCHES_COINS.length - 1, index));
-    coinLabel.textContent = TRENCHES_COINS[focusedCoinIndex].symbol + ' — ' + TRENCHES_COINS[focusedCoinIndex].name;
+    const c = TRENCHES_COINS[focusedCoinIndex];
+    // Show the AXIS — that's what the player is now choosing between, not
+    // just a name. Without this the per-coin profiles exist only in code.
+    coinLabel.textContent = `${c.symbol} — ${c.name}  ·  ${c.axis}  ·  ${(c.payMul ?? 1).toFixed(1)}x payout`;
   }
   setFocusedCoin(focusedCoinIndex);
 
@@ -769,7 +872,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // scene instead of showing as a black rectangle. Sprites always face
   // the camera automatically, which suits an endless-runner viewed from
   // a mostly-fixed chase angle.
-  const heroTexture = new THREE.TextureLoader().load('/assets/heroes/trenches-back-cutout.png');
+  const heroTexture = new THREE.TextureLoader().load('/assets/heroes/trenches-back-cutout.webp');
   const heroMat = new THREE.SpriteMaterial({ map: heroTexture, transparent: true });
   const heroSprite = new THREE.Sprite(heroMat);
   const HERO_HEIGHT = 2.1;
@@ -791,7 +894,16 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   const GREEN_COLOR = new THREE.Color(GREEN);
   const WARN_COLOR = new THREE.Color(0xffaa33);
   const FLIP_WARNING_MS = 650; // candles flicker amber for this long before actually flipping to red
+  const LANDING_GRACE_SECONDS = 0.10; // ~100ms of timing slack at any speed
   let activeEvent = null; // null | 'pump' | 'fud' — set by the periodic market-event system below, read by spawnCandle
+  // Declared here (not in the STATE block further down) because spawnCandle
+  // and spawnRow read its i9 profile fields (red/fuseMul/holeChance), and
+  // the initial seed loop calls them before that block is reached.
+  // Defaults to the last-picked coin; apeIntoCoin() re-rolls the seeded
+  // queue against whatever coin is actually chosen.
+  // Honour the ?coin= deep link (read at the top of this function) so the
+  // recipient lands pre-focused on the exact coin they were challenged on.
+  let difficulty = getCoinById(deepLinkCoin || getLastCoinId());
   const recentSpawnColors = []; // last few spawn colors, used to prevent long monochrome streaks
   const MAX_COLOR_STREAK = 3; // after this many consecutive same-color spawns, the next one is forced to flip
   const RED_SPAWN_CHANCE = 0.28; // baseline chance a candle spawns already-red instead of green
@@ -812,7 +924,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     // consecutive same-color spawns, the next one is forced to the
     // opposite color. forcedColor bypasses all of this — used only for
     // the guaranteed starting platform, which must always be safe.
-    let startColor = forcedColor || (Math.random() < RED_SPAWN_CHANCE ? 'red' : 'green');
+    let startColor = forcedColor || (Math.random() < (difficulty.red ?? RED_SPAWN_CHANCE) ? 'red' : 'green');
     if (!forcedColor) {
       const streakLen = recentSpawnColors.length;
       if (streakLen >= MAX_COLOR_STREAK && recentSpawnColors.slice(-MAX_COLOR_STREAK).every((c) => c === startColor)) {
@@ -831,6 +943,12 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     let fuseMin = 1800, fuseRange = 2600;
     if (activeEvent === 'pump') { fuseMin = 6000; fuseRange = 2000; }
     else if (activeEvent === 'fud') { fuseMin = 400; fuseRange = 600; }
+    // Applied AFTER the event adjustments so a coin's character scales the
+    // event window too, rather than the event flattening every coin to the
+    // same feel.
+    const fuseMul = difficulty.fuseMul ?? 1;
+    fuseMin *= fuseMul;
+    fuseRange *= fuseMul;
 
     // The fuse must start counting from when the candle actually becomes
     // REACHABLE, not from the moment it's created far away — otherwise a
@@ -851,6 +969,35 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     return candle;
   }
 
+  // i6: one candle per LANE per step, so the decision is which colour to
+  // ride rather than whether a platform exists in your lane at all.
+  // Reachability becomes structural; difficulty comes from speed, colour
+  // and deliberate holes instead of from random lane droughts.
+  // spawnCandle already applies the anti-streak colour rule, so calling it
+  // per lane preserves that behaviour.
+  function spawnRow(z, holeChance = 0) {
+    const kinds = [];
+    for (let lane = 0; lane < 3; lane++) {
+      kinds.push(Math.random() < holeChance ? 'hole' : null);
+    }
+    // never leave all three empty
+    if (kinds.every((k) => k === 'hole')) kinds[1] = null;
+    const spawned = [];
+    kinds.forEach((k, lane) => {
+      if (k === 'hole') return;
+      spawned.push(spawnCandle(z, lane));
+    });
+    // guarantee at least one green in the row
+    if (spawned.length && !spawned.some((c) => c.color === 'green')) {
+      const c = spawned[Math.floor(Math.random() * spawned.length)];
+      c.color = 'green';
+      c.mesh.material.color.set(GREEN);
+      c.mesh.material.emissive.set(GREEN);
+      c.flipAt = performance.now() + 1800 + Math.random() * 2600;
+    }
+    return spawned;
+  }
+
   // Guaranteed starting platform, directly under the player's spawn lane at
   // z=0. Without this, the nearest candle from the random seed loop below
   // starts at z=-4 and the player free-falls with nothing to land on until
@@ -861,12 +1008,13 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   // to catch a mid-air faller.
   const startCandle = spawnCandle(0, 1, 'green'); // lane 1 = LANES[1] = 0, matches player's starting lane — always forced green, must be safe
 
-  let spawnLaneCursor = 0; // rotates through lanes so no lane goes too long without a candle (see the respawn loop in update())
   let cursorZ = -4 * WORLD_SCALE;
   for (let i = 0; i < 30; i++) {
-    spawnCandle(cursorZ, spawnLaneCursor % 3);
-    spawnLaneCursor += 1 + Math.floor(Math.random() * 2);
-    cursorZ -= (2.1 + Math.random() * 0.9) * WORLD_SCALE;
+    // Spacing deliberately left at 3.4+1.4 — fixed spacing is what makes
+    // fast coins hard. Reachability now comes from spawnRow putting a
+    // platform in every lane, not from narrowing the gaps.
+    spawnRow(cursorZ, difficulty.holeChance ?? 0);
+    cursorZ -= (3.4 + Math.random() * 1.4) * WORLD_SCALE;
   }
   // Hide the track candles during the coin room — only the platform the
   // hero is already standing on (startCandle) stays visible, so the scene
@@ -881,10 +1029,12 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
   let onCandle = null;
   let elapsed = 0;
   let streak = 0;
+  let bestStreakThisRun = 0; // peak streak reached — surfaced on the shareable result card
+  let redLandingsThisRun = 0;
+  let greenLandingsThisRun = 0;
   let ended = false;
   let started = false;
   let paused = false;
-  let difficulty = getCoinById(getLastCoinId());
   let animId = null;
   let landSquashTimer = 0; // counts down after landing, drives the squash/rebound animation
   const MARKET_EVENT_INTERVAL = 22; // seconds between events
@@ -923,6 +1073,7 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     candles.forEach((c) => { c.mesh.visible = true; });
     laneGuides.forEach((line) => { line.visible = true; });
     touchButtonRow.style.display = 'flex';
+    burnWrap.style.display = 'block';
     chartCanvas.style.display = 'block';
     // Debug readout stays hidden by default now — it's a dev tool, not
     // something a player should see. Press D during a run to toggle it on
@@ -950,9 +1101,23 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     // ever survive intact.
     const now = performance.now();
     candles.forEach((c) => {
-      if (c.color !== 'green') return; // red-born candles have no fuse to refresh
+      // The seed queue was built at scene-mount, BEFORE a coin was chosen,
+      // so it carries the previously-picked coin's red rate. Re-roll each
+      // candle's colour against the coin actually selected, or the opening
+      // seconds of every run use the wrong profile. startCandle is
+      // excluded — it must stay green, it's the platform being stood on.
+      if (c !== startCandle) {
+        const shouldBeRed = Math.random() < (coin.red ?? RED_SPAWN_CHANCE);
+        c.color = shouldBeRed ? 'red' : 'green';
+        const hex = shouldBeRed ? RED : GREEN;
+        c.mesh.material.color.setHex(hex);
+        c.mesh.material.emissive.setHex(hex);
+        c.warningPlayed = false;
+      }
+      if (c.color !== 'green') { c.flipAt = Infinity; return; } // red-born candles have no fuse to refresh
       const travelSeconds = Math.abs(c.mesh.position.z) / Math.max(coin.base, 0.1);
-      c.flipAt = now + travelSeconds * 1000 + 1800 + Math.random() * 2600;
+      const fuseMul = coin.fuseMul ?? 1;
+      c.flipAt = now + travelSeconds * 1000 + (1800 + Math.random() * 2600) * fuseMul;
     });
 
     lastInputTime = performance.now();
@@ -1090,12 +1255,107 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     laneIndicator.querySelectorAll('.lane-dot').forEach((d, i) => d.classList.toggle('active', i === laneIndex));
   }
 
-  function showOverlay(title, reason, color) {
+  function showOverlay(title, reason, color, cardData) {
     ended = true;
     overlay.querySelector('#tr-overlay-title').textContent = title;
     overlay.querySelector('#tr-overlay-title').style.color = color || '#ff6688';
     overlay.querySelector('#tr-overlay-reason').textContent = reason;
     overlay.style.display = 'flex';
+
+    const slot = overlay.querySelector('#tr-card-slot');
+    const status = overlay.querySelector('#tr-share-status');
+    slot.innerHTML = '';
+    status.textContent = '';
+    if (!cardData) return;
+
+    // Render immediately WITHOUT rank so the card appears instantly, then
+    // re-render with rank once the network call lands. Blocking the card on
+    // a request would mean staring at nothing on a slow connection — and
+    // if the backend is down the card still works, just without the rank
+    // line (see the catch below).
+    let data = { ...cardData, rank: null };
+    function paint() {
+      const canvas = renderResultCard(data);
+      canvas.style.cssText = 'width:100%;height:auto;border-radius:10px;display:block;';
+      slot.innerHTML = '';
+      slot.appendChild(canvas);
+      return canvas;
+    }
+    let canvas = paint();
+
+    // Pre-fill the editable share text. Repopulated when rank arrives so
+    // the suggestion can upgrade to a rank-based highlight, but only if
+    // the player hasn't started editing — never clobber their words.
+    const shareBox = overlay.querySelector('#tr-share-text');
+    let playerEdited = false;
+    shareBox.oninput = () => { playerEdited = true; };
+    function refreshShareText() {
+      if (playerEdited) return;
+      shareBox.value = buildShareText(data, window.location.origin).text;
+    }
+    refreshShareText();
+
+    api.getRank(Math.round(data.pnl), 'trenches')
+      .then((rank) => { data = { ...data, rank }; canvas = paint(); refreshShareText(); })
+      .catch(() => { /* offline or backend down — card stands on its own */ });
+
+    overlay.querySelector('#tr-copy-btn').onclick = async () => {
+      status.textContent = (await copyCardToClipboard(canvas))
+        ? 'Image copied — paste it anywhere.'
+        : "Couldn't copy here. Use SAVE instead.";
+    };
+    overlay.querySelector('#tr-save-btn').onclick = () => {
+      downloadCard(canvas);
+      status.textContent = 'Saved to your downloads.';
+    };
+    overlay.querySelector('#tr-share-btn').onclick = async () => {
+      const { link } = buildShareText(data, window.location.origin);
+      const text = shareBox.value.trim() || buildShareText(data, window.location.origin).text;
+      // Native share sheet first (mobile), where the user can pick the app
+      // and the image rides along. Falls back to X's web intent on desktop.
+      try {
+        const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+        const file = blob ? new File([blob], 'candle-rider-run.png', { type: 'image/png' }) : null;
+        if (file && navigator.canShare?.({ files: [file] })) {
+          await navigator.share({ text, url: link, files: [file] });
+          return;
+        }
+      } catch { /* fall through to the intent link */ }
+      window.open(
+        `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(link)}`,
+        '_blank', 'noopener'
+      );
+      status.textContent = 'Tip: COPY IMAGE, then paste into the post.';
+    };
+  }
+
+  // Snapshot of everything the shareable card needs. Built at the moment
+  // the run ends, since bagHistory and streak are reset afterwards.
+  function buildCardData({ pnl, survived, isNewBest, subtitle, lossTitle, previousBest }) {
+    return {
+      pnl,
+      survived,
+      isNewBest: !!isNewBest,
+      subtitle,
+      lossTitle, // drives death-type-specific share phrasing
+      coinId: difficulty.id,
+      coinSymbol: difficulty.symbol,
+      coinAxis: difficulty.axis ?? '',
+      bestStreak: bestStreakThisRun,
+      durationSec: elapsed,
+      bagHistory: bagHistory.slice(),
+      rank: null,
+      // Signals the highlight selector scores against. These are what let
+      // it surface a genuinely remarkable TRUE fact about this specific
+      // run rather than reaching for a fixed sentence.
+      previousBest: previousBest ?? (gameState.state.bestPnlRun ?? 0),
+      energyAtEnd: gameState.state.energy ?? 0,
+      healthAtEnd: gameState.state.health ?? 100,
+      minHealthSeen: gameState.currentRun?.minHealthSeen ?? 100,
+      eventAtEnd: activeEvent, // 'pump' | 'fud' | null — died mid-event is a story
+      redLandings: redLandingsThisRun,
+      greenLandings: greenLandingsThisRun,
+    };
   }
 
   function cashOut() {
@@ -1115,15 +1375,59 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       const short = result.previousBest - result.pnlEarned;
       summary += ` Best is $${result.previousBest.toLocaleString()} — $${short.toLocaleString()} to beat it.`;
     }
-    showOverlay('CASHED OUT', summary, '#7dffcf');
+    showOverlay('CASHED OUT', summary, '#7dffcf',
+      buildCardData({ pnl: result.pnlEarned, survived: true, isNewBest: result.isNewBest,
+        previousBest: result.previousBest })); // needed for the near-miss / best-smashed highlights
   }
 
   function lose(title, reason) {
     if (ended) return;
+    // Capture the bag BEFORE loseRun() zeroes it — a player who dies
+    // previously never learned what the run was actually worth, which
+    // wastes the entire emotional point of a "cash out or lose it all"
+    // design. "You just forfeited $340" is the punishment landing.
+    const forfeited = Math.round(gameState.currentRun?.bag ?? 0);
+    const best = gameState.state.bestPnlRun ?? 0;
     gameState.loseRun(reason);
     sfx.loss();
-    showOverlay(title, reason, '#ff5577');
+    let summary = reason;
+    if (forfeited > 0) {
+      const LOSS_VERBS = {
+        'BURNED OUT': 'forfeited',
+        'LIQUIDITY VOID': 'lost',
+        'RUGPULLED': 'got rugged for',
+        'LIQUIDATED': 'were liquidated for',
+      };
+      summary += ` You ${LOSS_VERBS[title] || 'lost'} $${forfeited.toLocaleString()}.`;
+      if (best > 0 && forfeited > best) {
+        summary += ` That would have been a new personal best — ouch.`;
+      }
+    }
+    // Verb matters: "forfeit" means giving something up voluntarily or as
+    // a penalty, which only fits BURNED OUT (you chose to keep holding).
+    // Getting rugged or missing a jump isn't forfeiting — and using trader
+    // vocabulary here lands harder than a generic loss verb would.
+    const LOSS_SUBTITLES = {
+      'BURNED OUT': 'forfeited — conviction ran dry',
+      'LIQUIDITY VOID': 'gone — missed the landing',
+      'RUGPULLED': 'rugged — the floor vanished',
+      'LIQUIDATED': 'liquidated — bled out on reds',
+    };
+    showOverlay(title, summary, '#ff5577',
+      buildCardData({
+        pnl: forfeited,
+        survived: false,
+        isNewBest: false,
+        subtitle: LOSS_SUBTITLES[title] || 'gone',
+        lossTitle: title,
+      }));
   }
+
+  overlay.querySelector('#tr-lb-btn').addEventListener('click', () => {
+    // Surfaced here because this is peak competitive intent — the player
+    // just saw their number and immediately wants to know where it lands.
+    mountLeaderboard(root, { playerId: localStorage.getItem('candlerider:playerId') });
+  });
 
   overlay.querySelector('#tr-retry-btn').addEventListener('click', () => {
     teardown();
@@ -1183,7 +1487,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       idleWarning.style.display = 'none';
     }
 
-    speed = difficulty.base + Math.min(elapsed * difficulty.ramp, difficulty.cap);
+    // rampCap bounds the RAMP, not the speed: top speed is base + rampCap.
+    speed = difficulty.base + Math.min(elapsed * difficulty.ramp, difficulty.rampCap);
 
     if (!activeEvent && elapsed >= nextEventAt) triggerMarketEvent();
     if (activeEvent && elapsed >= eventEndsAt) endMarketEvent();
@@ -1255,20 +1560,15 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       }
       if (nextCursorZ === null || c.mesh.position.z < nextCursorZ) nextCursorZ = c.mesh.position.z;
     }
-    while (candles.length < 30 && !ended) {
-      // Spacing tightened (was 3.4-4.8 pre-scale). The real problem was
-      // that candles are randomly spread across 3 lanes, so consecutive
-      // SAME-LANE candles averaged ~3x the nominal gap — far beyond a
-      // single jump's ~3.1 unit forward reach, leaving the player with
-      // literally no reachable platform through no fault of their own.
-      // Tighter spacing + the lane-rotation below guarantees reachability.
-      cursorZ = (nextCursorZ !== null ? nextCursorZ : -4 * WORLD_SCALE) - (2.1 + Math.random() * 0.9) * WORLD_SCALE;
-      // Rotate through lanes rather than picking randomly — a purely random
-      // lane can produce long same-lane droughts. Rotation guarantees every
-      // lane gets a candle at least every 3 spawns, with a random offset so
-      // the pattern doesn't feel mechanically predictable.
-      spawnCandle(cursorZ, spawnLaneCursor % 3);
-      spawnLaneCursor += 1 + Math.floor(Math.random() * 2); // advance 1-2 lanes, keeps it varied but bounded
+    // Queue cap raised to 72: spawnRow places up to 3 candles per step, so
+    // a 24-candle budget would only cover ~8 rows of track ahead. 72 keeps
+    // roughly the same visible distance as before the row change.
+    while (candles.length < 72 && !ended) {
+      // Spacing deliberately left at 3.4+1.4 — fixed spacing is what makes
+      // fast coins hard. Reachability comes from spawnRow putting a
+      // platform in every lane, not from narrowing the gaps.
+      cursorZ = (nextCursorZ !== null ? nextCursorZ : -4 * WORLD_SCALE) - (3.4 + Math.random() * 1.4) * WORLD_SCALE;
+      spawnRow(cursorZ, difficulty.holeChance ?? 0);
       nextCursorZ = cursorZ;
     }
 
@@ -1282,7 +1582,13 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
       // keeps the in-range TIME window consistent (~1.1s) regardless of
       // difficulty tier or the speed ramp within a run, so jumping straight
       // up reliably lands back on the same candle you took off from.
-      const nearZ = Math.abs(c.mesh.position.z - player.position.z) < CANDLE_D / 2 + speed * 0.55;
+      // Multiplying by speed keeps the grace a constant amount of TIME
+      // rather than distance (a fixed distance would shrink the window as
+      // speed rises). The previous 0.55 was far too generous though: at
+      // $APEMAX's top speed that's a ~14-unit catch radius, which snapped
+      // the player onto candles from absurdly far away and made the
+      // fastest coins impossible to fall off — difficulty was inverted.
+      const nearZ = Math.abs(c.mesh.position.z - player.position.z) < CANDLE_D / 2 + speed * LANDING_GRACE_SECONDS;
       const topY = c.mesh.position.y + c.height / 2; // true top surface (mesh.position.y already includes the ground-offset — was double-subtracting 1.2 before)
       const playerFeetY = player.position.y;
       if (sameLane && nearZ && velY <= 0 && playerFeetY <= topY + 0.35 && playerFeetY >= topY - 0.6) {
@@ -1297,15 +1603,18 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
           c.scored = true;
           if (c.color === 'green') {
             const baseGain = 8 + Math.floor(Math.random() * 10);
-            const riskMult = coinPayoutMultiplier(difficulty); // faster/riskier coins pay proportionally more — makes the coin choice a real decision
+            const riskMult = difficulty.payMul ?? 1; // explicit per-coin payout, set alongside its other profile fields
             const gain = Math.round(baseGain * riskMult * (activeEvent === 'pump' ? 1.5 : 1));
             gameState.addBag(gain);
             streak += 1;
+            if (streak > bestStreakThisRun) bestStreakThisRun = streak;
+            greenLandingsThisRun++;
             sfx.landGreen();
             if (streak > 1) sfx.streak(streak);
             popCombo(streak > 1 ? `+$${gain} LANDED (x${streak} STREAK!)` : `+$${gain} LANDED`, '#7dffcf');
           } else {
             gameState.addBag(-6);
+            redLandingsThisRun++;
             streak = 0;
             sfx.landRed();
             popCombo('LANDED ON RED', '#ff9955');
@@ -1325,6 +1634,8 @@ export function mountTrenchesScene(container, gameState, onRunEnd) {
     }
 
     gameState.reportEnergy(gameState.state.energy - 2.2 * dt);
+    updateBurnBar(gameState.state.energy);
+    updateCashOutPressure(gameState.state.energy, gameState.currentRun?.bag ?? 0);
     if (gameState.state.energy <= 0) {
       lose('BURNED OUT', 'Energy hit zero — even degens need sleep.');
     }

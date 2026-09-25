@@ -20,6 +20,13 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // Sourcemaps were shipping a 2MB .js.map alongside a 564kB bundle —
+    // roughly 4x the payload, for debug data no player benefits from.
+    // 'hidden' still generates the map (so it can be uploaded to an error
+    // reporter if one is ever added) but strips the comment that tells
+    // browsers to fetch it. Delete dist/**/*.map before deploying, or set
+    // this to false outright if you never want it produced.
+    sourcemap: 'hidden',
+    chunkSizeWarningLimit: 700, // the 500kB warning is Three.js, not app code — 148kB gzipped over the wire is fine for a 3D game
   },
 });

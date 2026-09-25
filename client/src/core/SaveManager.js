@@ -11,6 +11,7 @@ import { eventBus } from './EventBus.js';
 import { DEFAULT_PLAYER_STATE } from '@candle-rider/shared';
 
 const PLAYER_ID_KEY = 'candlerider:playerId';
+const DISPLAY_NAME_KEY = 'candlerider:displayName';
 const STATE_MIRROR_KEY = 'candlerider:stateMirror';
 const SAVE_DEBOUNCE_MS = 4000;
 
@@ -85,7 +86,9 @@ export class SaveManager {
     const state = this.gameState.snapshot();
     this._writeMirror(state);
     try {
-      await api.postSave(this.playerId, { state });
+      // Send the display name too — the API always accepted one but the
+      // client never sent it, so every leaderboard row read 'Degen'.
+      await api.postSave(this.playerId, { state, displayName: getDisplayName() });
     } catch (err) {
       // Backend save failed (offline, server down) — the localStorage
       // mirror still has the latest state, so nothing is lost; it'll sync
@@ -116,4 +119,51 @@ export class SaveManager {
     const raw = localStorage.getItem(STATE_MIRROR_KEY);
     return raw ? JSON.parse(raw) : null;
   }
+}
+
+// Leaderboard identity. Deliberately local and anonymous — no account, no
+// login, consistent with the game having no wallet or auth anywhere.
+//
+// Every player is auto-assigned a handle on first play so the board never
+// shows a wall of identical "Degen" rows. They can override it with a
+// custom name from the leaderboard panel at any time.
+
+// Excludes 0/O/1/I/5/S — ambiguous glyphs make a handle hard to read back
+// from a screenshot, which is exactly how these get shared.
+const HANDLE_ALPHABET = '23456789ABCDEFGHJKLMNPQRTUVWXYZ';
+const HANDLE_LENGTH = 4;
+
+function randomHandleSuffix() {
+  const bytes = new Uint8Array(HANDLE_LENGTH);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    // Non-secure context (LAN/HTTP testing) — Math.random is fine here,
+    // this is a display handle, not a security token.
+    for (let i = 0; i < HANDLE_LENGTH; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  let out = '';
+  for (let i = 0; i < HANDLE_LENGTH; i++) out += HANDLE_ALPHABET[bytes[i] % HANDLE_ALPHABET.length];
+  return out;
+}
+
+// ~923k combinations at 4 chars, so collisions stay negligible well past
+// any realistic player count. Generated once and persisted — regenerating
+// per session would detach a player from their own leaderboard history.
+export function getDisplayName() {
+  let name = localStorage.getItem(DISPLAY_NAME_KEY);
+  if (!name) {
+    name = `Degen-${randomHandleSuffix()}`;
+    try { localStorage.setItem(DISPLAY_NAME_KEY, name); } catch { /* non-fatal */ }
+  }
+  return name;
+}
+
+export function setDisplayName(name) {
+  const clean = String(name || '').trim().slice(0, 20);
+  // An empty submission regenerates a fresh handle rather than collapsing
+  // the player back to a bare "Degen" shared with everyone else.
+  const finalName = clean || `Degen-${randomHandleSuffix()}`;
+  try { localStorage.setItem(DISPLAY_NAME_KEY, finalName); } catch { /* non-fatal */ }
+  return finalName;
 }

@@ -34,13 +34,14 @@ const PATH_SCENES = {
 
 async function boot() {
   const container = document.getElementById('app');
+  let teardownHUD = null; // hoisted out of the try so the catch handler below can reach it (a const declared inside try{} is not in scope in catch{})
 
   try {
     const gameState = new GameState();
     const saveManager = new SaveManager(gameState);
     await saveManager.load(); // populates gameState from backend/local mirror; now has a 5s timeout, can no longer hang forever
 
-    mountHUD(container, gameState);
+    teardownHUD = mountHUD(container, gameState);
     let teardownInstallPrompt = mountInstallPrompt(container);
 
     // Logs every voluntary cash-out to the backend for the leaderboard.
@@ -86,6 +87,7 @@ async function boot() {
     // black-screen bug go undiagnosed. Any startup failure now shows a
     // visible message with the actual error, plus a retry button.
     console.error('[main] boot failed:', err);
+    teardownHUD?.(); // unsubscribe the HUD's listener + cancel any queued paint before the error screen replaces the container
     showBootError(container, err);
   }
 }
