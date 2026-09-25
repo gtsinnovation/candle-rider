@@ -16,7 +16,6 @@
 // the other four paths where Space is free for cash-out). P pauses.
 
 import * as THREE from 'three';
-import { eventBus } from '../../core/EventBus.js';
 import { TRENCHES_COINS, getLastCoinId, setLastCoinId, getCoinById } from './trenchesCoins.js';
 import { sfx } from '../../core/AudioEngine.js';
 import { renderResultCard, copyCardToClipboard, downloadCard, buildShareText } from '../../ui/ResultCard.js';
