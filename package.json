@@ -13,5 +13,9 @@
     "dev:server": "npm run dev --workspace=server",
     "build:client": "npm run build --workspace=client",
     "start:server": "npm run start --workspace=server"
+  },
+  "dependencies": {
+    "@base44/sdk": "^0.8.63",
+    "@base44/vite-plugin": "^1.0.52"
   }
 }
