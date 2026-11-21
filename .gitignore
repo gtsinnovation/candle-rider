@@ -8,3 +8,4 @@ data/
 .env
 deploy/env/candle-rider-api.env
 .DS_Store
+base44/.app.jsonc
